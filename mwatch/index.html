@@ -1,0 +1,256 @@
+﻿<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="NSE Market Watch">
+    <title>Market Watch</title>
+    <link rel="stylesheet" href="https://unpkg.com/purecss@2.0.3/build/pure-min.css"
+          integrity="sha384-cg6SkqEOCV1NbJoCu11+bm0NvBRc8IYLRGXkmNrqUBfTjmMYwNKPWBTIKyw9mHNJ" crossorigin="anonymous">
+    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="stylesheet" href="/css/settings.css">
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
+    <script src="/js/table.js"></script>
+    <script src="/js/settings.js"></script>
+</head>
+
+<body>
+
+    <div id="layout">
+
+        <!-- Menu toggle -->
+        <a href="#menu" id="menuLink" class="menu-link">
+            <!-- Hamburger icon -->
+            <span></span>
+        </a>
+
+        <div id="menu">
+            <div class="pure-menu">
+                <a class="pure-menu-heading" href="/index.html">Residue</a>
+
+                <ul class="pure-menu-list">
+                    <li class="pure-menu-item">
+                        <a href="/range/index.html" class="pure-menu-link">Range Calc</a>
+                    </li>
+
+                    <li class="pure-menu-item">
+                        <a href="/mwatch/index.html" class="pure-menu-link">Index Watch</a>
+                    </li>
+
+                    <li class="pure-menu-item"><a href="#" onclick="openSettings('MWatch')" class="pure-menu-link">Settings</a></li>
+                    <li class="pure-menu-item"><a href="/contact/index.html" class="pure-menu-link">Contact Us</a></li>
+                </ul>
+            </div>
+        </div>
+
+        <div id="main">
+            <div class="header">
+                <h1>Index Options Data</h1>
+                <!-- h2>A subtitle for your page goes here</h2 -->
+            </div>
+
+            <div class="content">
+                <!-- h2 class="content-subhead">Utilities</h2-->
+
+                <!-- input type="file" name="inputfile" id="inputfile" -->
+                <div class="flex-container">
+                    <div>
+                        <select id="underlying" style="height:30px">
+                            <option selected>NIFTY</option>
+                            <option>BANKNIFTY</option>
+                        </select>
+                    </div>
+                    <div><label id="underlyingPrice"></label></div>
+                    <div><select id="expiry" style="width:120px; height:30px"></select></div>
+                    <div><button type="button" style="background-color: #8CCCF1; height:30px;" onClick="getChain()">GO</button></div>
+                    <div><label style="font-weight:bold">Market: </label><label id="market"></label></div>
+                    <div>
+                        <label style="font-weight:bold">Data as of:</label>
+                        <label id="lastUpdateTime"></label>
+                    </div>
+                </div>
+                <div class="bar error" id="alert">
+                    <div class="close" onclick="this.parentElement.remove()">X</div>
+                    <i class="ico">&#9747;</i> Error message
+                </div>
+                <div id="settingsModal" class="modal"></div>
+                <table id="option-table" class="display" style="width:100%">
+                </table>
+
+                <pre id="output"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/ui.js" page="base"></script>
+
+    <script type="text/javascript">
+
+        var dataset = [];
+        var dt = null;
+        var worker = new Worker('/js/datafetch.js');
+        var interval = setInterval(getChain, 60000);    // Reload Data every 1 minute / 60 seconds
+
+        $(document).ready(function (e) {
+
+            dt = dynamicTable.config('option-table',
+                ['CEpchangeinOpenInterest', 'CEchangeinOpenInterest', 'CEopenInterest', 'CEltp', 'strikePrice', 'PEltp', 'PEopenInterest', 'PEchangeinOpenInterest', 'PEpchangeinOpenInterest' ],
+                ['% Chg OI', 'Chg OI', 'OI', 'LTP', 'Strike Price', 'LTP', 'OI', 'Chg OI', '% Chg OI'],
+                'Fetching the Data...');
+
+            getChain();
+        });
+
+        function getChain() {
+
+            worker.postMessage(document.getElementById('underlying').value);
+        }
+
+        worker.onmessage = function (event) {
+            if (event.data.status != 200) {
+                alertMessage(event.data.message + "[" + event.data.status + "]");
+                return;
+            }
+
+            dataset = event.data;
+            // console.log(dataset);
+
+            if (typeof (Storage) !== "undefined") {
+                localStorage.setItem("CurrentChain", JSON.stringify(dataset));
+            }
+
+            document.getElementById('underlyingPrice').innerHTML = dataset["underlyingPrice"];
+            document.getElementById('market').innerHTML = dataset["market"];
+            document.getElementById('lastUpdateTime').innerHTML = dataset["lastUpdateTime"];
+
+            let select = document.getElementById('expiry');
+            let expirySel
+            if (select.selectedIndex != -1) {
+                expirySel = select.options[select.selectedIndex].text;
+            } else {
+                expirySel = dataset.expiries[0];
+            }
+            select.options.length = 0;   // Remove all child option nodes
+            for (let i = 0; i < dataset.expiries.length; i++) {
+                let optNode = document.createElement("option");
+                optNode.innerText = dataset.expiries[i];
+                if (dataset.expiries[i] == expirySel) {
+                    optNode.selected = true;
+                }
+                select.appendChild(optNode);
+            }
+
+            let displayStrikes = [];
+            let paramName = "DisplayStrikes" + dataset.underlying;
+            const mwatchSettings = getSettingsData("MWatch");
+            if (mwatchSettings && mwatchSettings[paramName]) {
+                displayStrikes = mwatchSettings[paramName];
+            }
+
+            dataset = getTableData(dataset.allChains[expirySel], displayStrikes);
+            dt.load(dataset);
+        };
+
+        worker.onerror = function (err) {
+            console.log(err);
+            alertMessage(err);
+
+            //alertMessage("Plain bar with no extras");
+            //alertMessage("Information", 1, "&#8505;");
+            //alertMessage("Success", 2, "&#9745;");
+            //alertMessage("Warning", 3, "&#9888;");
+        };
+
+        function getTableData(curExpOptChn, displayStrikes) {
+            
+            let dataArr = [];
+            for (strike in curExpOptChn) {
+                if (displayStrikes.length > 0 && !displayStrikes.find((elem) => { return elem == strike })) {
+                    continue;
+                }
+
+                let row = {};
+                let ce = curExpOptChn[strike]['CE'];
+                let pe = curExpOptChn[strike]['PE']
+                if (ce) {
+                    row["CEpchangeinOpenInterest"] = Number(ce["pchangeinOpenInterest"]).toFixed(2);
+                    row["CEchangeinOpenInterest"] = ce["changeinOpenInterest"];
+                    row["CEopenInterest"] = ce["openInterest"];
+                    row["CEltp"] = ce["lastPrice"];
+                } else {
+                    row["CEpchangeinOpenInterest"] = "";
+                    row["CEchangeinOpenInterest"] = "";
+                    row["CEopenInterest"] = "";
+                    row["CEltp"] = "";
+                }
+                row["strikePrice"] = parseInt(strike);
+                if (pe) {
+                    row["PEpchangeinOpenInterest"] = Number(pe["pchangeinOpenInterest"]).toFixed(2);
+                    row["PEchangeinOpenInterest"] = pe["changeinOpenInterest"];
+                    row["PEopenInterest"] = pe["openInterest"];
+                    row["PEltp"] = pe["lastPrice"];
+                } else {
+                    row["PEpchangeinOpenInterest"] = "";
+                    row["PEchangeinOpenInterest"] = "";
+                    row["PEopenInterest"] = "";
+                    row["PEltp"] = "";
+                }
+
+                dataArr.push(row);
+            }
+
+            return dataArr.sort((a, b) => { return (a["strikePrice"] - b["strikePrice"]) });
+        }
+
+        function getDataTable(curExpOptChn) {
+            // Function for JQuery DataTable compatible data array
+            let dataArr = [];
+            for (strike in curExpOptChn) {
+                let rowArr = [];
+                let ce = curExpOptChn[strike]['CE'];
+                let pe = curExpOptChn[strike]['PE']
+                if (ce) {
+                    rowArr.push(Number(ce["pchangeinOpenInterest"]).toFixed(2));
+                    rowArr.push(ce["changeinOpenInterest"]);
+                    rowArr.push(ce["openInterest"]);
+                } else {
+                    rowArr.push("");
+                    rowArr.push("");
+                    rowArr.push("");
+                }
+                rowArr.push(parseInt(strike));
+                if (pe) {
+                    rowArr.push(pe["openInterest"]);
+                    rowArr.push(pe["changeinOpenInterest"]);
+                    rowArr.push(Number(pe["pchangeinOpenInterest"]).toFixed(2));
+                } else {
+                    rowArr.push("");
+                    rowArr.push("");
+                    rowArr.push("");
+                }
+
+                dataArr.push(rowArr);
+            }
+
+            return dataArr.sort((a, b) => { return (a[3] - b[3]) });
+        }
+
+        // https://code-boxx.com/simple-css-error-messages/
+        function alertMessage(message) {
+            // alertmessage() : enable a notification bar
+            // message : notification message
+
+            let alertNode = document.getElementById("alert");
+            alertNode.innerHTML = message;
+            alertNode.style.display = "block";
+            setTimeout(function () {
+                alertNode.style.display = 'none';
+            }, 5000);
+        }
+
+    </script>
+</body>
+
+</html>
