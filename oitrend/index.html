@@ -117,8 +117,8 @@
         $(document).ready(function (e) {
 
             dtable = dynamicTable.config('oidata-table',
-                ['Time', 'CallOI', 'PutOI', 'Diff', 'Signal'],
-                ['Time', 'Call OI', 'Put OI', 'Difference', 'Signal'],
+                ['Time', 'Idx', 'CallOI', 'CallChgOI', 'PutOI', 'PutChgOI', 'DiffOI', 'DiffChgOI', 'Signal'],
+                ['Time', 'Idx', 'Call OI', 'Call Chg OI', 'Put OI', 'Put Chg OI', 'Diff OI', 'Diff Chg OI', 'Signal'],
                 'Fetching the Data...');
 
             refDuration = getRefreshDuration();
@@ -215,6 +215,7 @@
             }
 
             let newTrendData = getTableData(dataset.allChains[expirySel], strikesToAdd);
+            newTrendData.Idx = dataset['underlyingPrice'];
             prevOITrendData.unshift(newTrendData);
 
             dtable.load(prevOITrendData);
@@ -234,26 +235,31 @@
 
         function getTableData(selExpOptChn, strikesToAdd) {
 
-            let dataObj = { Time: "", CallOI: 0, PutOI: 0, Diff: 0, Signal: "" };
+            let dataObj = { Time: "", Idx: "", CallOI: 0, CallChgOI: 0, PutOI: 0, PutChgOI: 0, DiffOI: 0, DiffChgOI: 0, Signal: "" };
             for (strike in selExpOptChn) {
                 if (strikesToAdd.length >= 0 && !strikesToAdd.find((elem) => { return elem == strike })) {
                     continue;
                 }
 
+                
                 let ce = selExpOptChn[strike]['CE'];
                 let pe = selExpOptChn[strike]['PE']
                 if (ce) {
                     dataObj.CallOI += ce["openInterest"];
+                    dataObj.CallChgOI = ce["changeinOpenInterest"];
                 }
 
                 if (pe) {
                     dataObj.PutOI += pe["openInterest"];
+                    dataObj.PutChgOI = pe["changeinOpenInterest"];
                 }
             }
 
             dataObj.Time = new Date().toLocaleTimeString();
-            dataObj.Diff = dataObj.PutOI - dataObj.CallOI;
-            if (dataObj.Diff >= 0) {
+            dataObj.DiffOI = dataObj.PutOI - dataObj.CallOI;
+            dataObj.DiffChgOI = dataObj.PutChgOI - dataObj.CallChgOI;
+
+            if (dataObj.DiffChgOI >= 0) {
                 dataObj.Signal = "BUY";
             } else {
                 dataObj.Signal = "SELL";
