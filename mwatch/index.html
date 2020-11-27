@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="css/styles.css">
     <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
     <script src="/js/table.js"></script>
+    <script src="/js/storage.js"></script>
     <script src="/js/settings.js"></script>
 </head>
 
@@ -38,7 +39,9 @@
                     <li class="pure-menu-item">
                         <a href="/mwatch/index.html" class="pure-menu-link">Index Watch</a>
                     </li>
-
+                    <li class="pure-menu-item">
+                        <a href="/oitrend/index.html" class="pure-menu-link">OI Trend</a>
+                    </li>
                     <li class="pure-menu-item"><a href="#" onclick="openSettings('MWatch')" class="pure-menu-link">Settings</a></li>
                     <li class="pure-menu-item"><a href="/contact/index.html" class="pure-menu-link">Contact Us</a></li>
                 </ul>
@@ -65,6 +68,7 @@
                     <div><label id="underlyingPrice"></label></div>
                     <div><select id="expiry" style="width:120px; height:30px"></select></div>
                     <div><button type="button" style="background-color: #8CCCF1; height:30px;" onClick="getChain()">GO</button></div>
+                    <div><label style="font-weight:bold">VIX: </label><label id="vix"></label></div>
                     <div><label style="font-weight:bold">Market: </label><label id="market"></label></div>
                     <div>
                         <label style="font-weight:bold">Data as of:</label>
@@ -122,6 +126,7 @@
             }
 
             document.getElementById('underlyingPrice').innerHTML = dataset["underlyingPrice"];
+            document.getElementById('vix').innerHTML = dataset["indiaVIX"];
             document.getElementById('market').innerHTML = dataset["market"];
             document.getElementById('lastUpdateTime').innerHTML = dataset["lastUpdateTime"];
 

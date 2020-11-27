@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="css/styles.css">
     <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
     <script src="/js/table.js"></script>
+    <script src="/js/storage.js"></script>
     <script src="/js/settings.js"></script>
 </head>
 
@@ -34,7 +35,9 @@
                     <li class="pure-menu-item">
                         <a href="/range/index.html" class="pure-menu-link">Range Calc</a>
                     </li>
-
+                    <li class="pure-menu-item">
+                        <a href="/mwatch/index.html" class="pure-menu-link">Index Watch</a>
+                    </li>
                     <li class="pure-menu-item">
                         <a href="/oitrend/index.html" class="pure-menu-link">OI Trend</a>
                     </li>
@@ -53,7 +56,6 @@
 
             <div class="content">
                 <!-- h2 class="content-subhead">Utilities</h2-->
-
                 <!-- input type="file" name="inputfile" id="inputfile" -->
                 <div class="flex-container">
                     <div>
@@ -70,13 +72,16 @@
                         <label style="font-weight:bold">Data as of:</label>
                         <label id="lastUpdateTime"></label>
                     </div>
+                    <div><label style="font-weight:bold" for="duration">Refresh Duration (Mins) </label><input type="text" id="duration" style="width: 30px" value="5" onChange="updateDuration()"/></div>
+                    <div><label style="font-weight:bold">Using </label><label id="strikeCount"></label><label style="font-weight:bold"> Strikes</label></div>
+                    <div><button type="button" style="background-color: #ff0000; height:30px;" onClick="clearData()">RESET</button></div>
                 </div>
                 <div class="bar error" id="alert">
                     <div class="close" onclick="this.parentElement.remove()">X</div>
                     <i class="ico">&#9747;</i> Error message
                 </div>
                 <div id="settingsModal" class="modal"></div>
-                <table id="option-table" class="display" style="width:100%">
+                <table id="oidata-table" class="display" style="width:100%">
                 </table>
 
                 <pre id="output"></pre>
@@ -85,7 +90,7 @@
     </div>
 
     <script src="/js/ui.js" page="base"></script>
-
+    
     <script type="text/javascript">
 
         //document.getElementById('inputfile')
@@ -100,16 +105,22 @@
         //});
 
         var dataset = [];
-        var dt = null;
+        var dtable = null;
+        var refDuration = 5;   // Minutes
+        var interval = null;
+
         var worker = new Worker('/js/datafetch.js');
-        var interval = setInterval(getChain, 60000);    // Reload Data every 1 minute / 60 seconds
 
         $(document).ready(function (e) {
 
-            dt = dynamicTable.config('option-table',
-                ['CEpchangeinOpenInterest', 'CEchangeinOpenInterest', 'CEopenInterest', 'CEltp', 'strikePrice', 'PEltp', 'PEopenInterest', 'PEchangeinOpenInterest', 'PEpchangeinOpenInterest' ],
-                ['% Chg OI', 'Chg OI', 'OI', 'LTP', 'Strike Price', 'LTP', 'OI', 'Chg OI', '% Chg OI'],
+            dtable = dynamicTable.config('oidata-table',
+                ['Time', 'CallOI', 'PutOI', 'Diff', 'Signal'],
+                ['Time', 'Call OI', 'Put OI', 'Difference', 'Signal'],
                 'Fetching the Data...');
+
+            refDuration = getRefreshDuration();
+            if (refDuration < 1000) refDuration = 1000;
+            interval = setInterval(getChain, refDuration * 60 * 1000);
 
             getChain();
         });
@@ -117,6 +128,37 @@
         function getChain() {
 
             worker.postMessage(document.getElementById('underlying').value);
+        }
+
+        function updateDuration() {
+            let dur = document.getElementById('duration').value;
+            let paramNameDur = "RefreshDur" + document.getElementById('underlying').value;
+            const oiTrendSettings = getSettingsData("OITrend");
+            
+            if (oiTrendSettings) {
+                oiTrendSettings[paramNameDur] = dur;
+            } else {
+                oiTrendSettings = {
+                    [paramNameDur]: dur
+                };
+            }
+            saveSettingsData('OITrend', oiTrendSettings);
+            refDuration = dur;
+            clearInterval(interval);
+
+            if (refDuration < 1000) refDuration = 1000;
+            internal = setInterval(getChain, refDuration * 60 * 1000);
+        }
+
+        function getRefreshDuration() {
+            let paramNameDur = "RefreshDur" + document.getElementById('underlying').value;
+            const oiTrendSettings = getSettingsData("OITrend");
+            if (oiTrendSettings && oiTrendSettings[paramNameDur]) {
+                document.getElementById('duration').value = oiTrendSettings[paramNameDur];
+                return oiTrendSettings[paramNameDur];
+            }
+
+            return document.getElementById('duration').value;
         }
 
         worker.onmessage = function (event) {
@@ -128,9 +170,7 @@
             dataset = event.data;
             // console.log(dataset);
 
-            if (typeof (Storage) !== "undefined") {
-                localStorage.setItem("CurrentChain", JSON.stringify(dataset));
-            }
+            saveCurrentChain(dataset);
 
             document.getElementById('underlyingPrice').innerHTML = dataset["underlyingPrice"];
             document.getElementById('market').innerHTML = dataset["market"];
@@ -144,6 +184,7 @@
                 expirySel = dataset.expiries[0];
             }
             select.options.length = 0;   // Remove all child option nodes
+
             for (let i = 0; i < dataset.expiries.length; i++) {
                 let optNode = document.createElement("option");
                 optNode.innerText = dataset.expiries[i];
@@ -153,15 +194,29 @@
                 select.appendChild(optNode);
             }
 
-            let displayStrikes = [];
-            let paramName = "DisplayStrikes" + dataset.underlying;
+            let strikesToAdd = [];
+            let paramNameSTA = "DisplayStrikes" + dataset.underlying;
             const oiTrendSettings = getSettingsData("OITrend");
-            if (oiTrendSettings && oiTrendSettings[paramName]) {
-                displayStrikes = oiTrendSettings[paramName];
+            if (oiTrendSettings && oiTrendSettings[paramNameSTA]) {
+                strikesToAdd = oiTrendSettings[paramNameSTA];
+            }
+            if (strikesToAdd.length == 0) {
+                strikesToAdd = dataset.strikes;
+            }
+            document.getElementById('strikeCount').innerHTML = strikesToAdd.length;
+
+            let prevOITrendData = [];
+            prevOITrendData = getOITrendData(dataset.underlying, expirySel);
+            if (prevOITrendData == null) {
+                prevOITrendData = [];
             }
 
-            dataset = getTableData(dataset.allChains[expirySel], displayStrikes);
-            dt.load(dataset);
+            let newTrendData = getTableData(dataset.allChains[expirySel], strikesToAdd);
+            prevOITrendData.unshift(newTrendData);
+
+            dtable.load(prevOITrendData);
+
+            saveOITrendData(dataset.underlying, expirySel, prevOITrendData);
         };
 
         worker.onerror = function (err) {
@@ -174,78 +229,45 @@
             //alertMessage("Warning", 3, "&#9888;");
         };
 
-        function getTableData(curExpOptChn, displayStrikes) {
-            
-            let dataArr = [];
-            for (strike in curExpOptChn) {
-                if (displayStrikes.length > 0 && !displayStrikes.find((elem) => { return elem == strike })) {
+        function getTableData(selExpOptChn, strikesToAdd) {
+
+            let dataObj = { Time: "", CallOI: 0, PutOI: 0, Diff: 0, Signal: "" };
+            for (strike in selExpOptChn) {
+                if (strikesToAdd.length >= 0 && !strikesToAdd.find((elem) => { return elem == strike })) {
                     continue;
                 }
 
-                let row = {};
-                let ce = curExpOptChn[strike]['CE'];
-                let pe = curExpOptChn[strike]['PE']
+                let ce = selExpOptChn[strike]['CE'];
+                let pe = selExpOptChn[strike]['PE']
                 if (ce) {
-                    row["CEpchangeinOpenInterest"] = Number(ce["pchangeinOpenInterest"]).toFixed(2);
-                    row["CEchangeinOpenInterest"] = ce["changeinOpenInterest"];
-                    row["CEopenInterest"] = ce["openInterest"];
-                    row["CEltp"] = ce["lastPrice"];
-                } else {
-                    row["CEpchangeinOpenInterest"] = "";
-                    row["CEchangeinOpenInterest"] = "";
-                    row["CEopenInterest"] = "";
-                    row["CEltp"] = "";
-                }
-                row["strikePrice"] = parseInt(strike);
-                if (pe) {
-                    row["PEpchangeinOpenInterest"] = Number(pe["pchangeinOpenInterest"]).toFixed(2);
-                    row["PEchangeinOpenInterest"] = pe["changeinOpenInterest"];
-                    row["PEopenInterest"] = pe["openInterest"];
-                    row["PEltp"] = pe["lastPrice"];
-                } else {
-                    row["PEpchangeinOpenInterest"] = "";
-                    row["PEchangeinOpenInterest"] = "";
-                    row["PEopenInterest"] = "";
-                    row["PEltp"] = "";
+                    dataObj.CallOI += ce["openInterest"];
                 }
 
-                dataArr.push(row);
+                if (pe) {
+                    dataObj.PutOI += pe["openInterest"];
+                }
             }
 
-            return dataArr.sort((a, b) => { return (a["strikePrice"] - b["strikePrice"]) });
+            dataObj.Time = new Date().toLocaleTimeString();
+            dataObj.Diff = dataObj.PutOI - dataObj.CallOI;
+            if (dataObj.Diff >= 0) {
+                dataObj.Signal = "BUY";
+            } else {
+                dataObj.Signal = "SELL";
+            }
+
+            return dataObj;
         }
 
-        function getDataTable(curExpOptChn) {
-            // Function for JQuery DataTable compatible data array
-            let dataArr = [];
-            for (strike in curExpOptChn) {
-                let rowArr = [];
-                let ce = curExpOptChn[strike]['CE'];
-                let pe = curExpOptChn[strike]['PE']
-                if (ce) {
-                    rowArr.push(Number(ce["pchangeinOpenInterest"]).toFixed(2));
-                    rowArr.push(ce["changeinOpenInterest"]);
-                    rowArr.push(ce["openInterest"]);
-                } else {
-                    rowArr.push("");
-                    rowArr.push("");
-                    rowArr.push("");
-                }
-                rowArr.push(parseInt(strike));
-                if (pe) {
-                    rowArr.push(pe["openInterest"]);
-                    rowArr.push(pe["changeinOpenInterest"]);
-                    rowArr.push(Number(pe["pchangeinOpenInterest"]).toFixed(2));
-                } else {
-                    rowArr.push("");
-                    rowArr.push("");
-                    rowArr.push("");
-                }
-
-                dataArr.push(rowArr);
+        function clearData() {
+            let underlying = document.getElementById('underlying').value;
+            let select = document.getElementById('expiry');
+            let expirySel
+            if (select.selectedIndex != -1) {
+                expirySel = select.options[select.selectedIndex].text;
             }
-
-            return dataArr.sort((a, b) => { return (a[3] - b[3]) });
+            saveOITrendData(underlying, expirySel, []);
+            getChain();
         }
 
         // https://code-boxx.com/simple-css-error-messages/

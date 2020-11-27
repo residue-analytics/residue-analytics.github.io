@@ -34,7 +34,7 @@ function openSettings(pageName) {
 function populateTable(pageName, tableNode) {
     const numRows = 20;
     if (typeof (Storage) !== "undefined") {
-        const chainData = JSON.parse(localStorage.getItem("CurrentChain"));
+        const chainData = getCurrentChain();
         const oiTrendSettings = getSettingsData(pageName);
         const paramName = "DisplayStrikes" + chainData.underlying;
         const displayStrikes = oiTrendSettings[paramName] ? oiTrendSettings[paramName] : [];
@@ -107,14 +107,11 @@ function strikeClicked(evt, pageName, underlying) {
 
 function getSettingsData(key) {
     // key - Page Identifier
-    let settingsData = JSON.parse(localStorage.getItem("ResidueSettings"));
-    if (!settingsData) {
-        settingsData = {};
-        localStorage.setItem("ResidueSettings", JSON.stringify(settingsData));
-    }
+    let settingsData = getGlobalSettings();
+
     if (!settingsData[key]) {
         settingsData[key] = {};
-        localStorage.setItem("ResidueSettings", JSON.stringify(settingsData));
+        saveGlobalSettings(settingsData);
     }
 
     return settingsData[key];
@@ -122,9 +119,9 @@ function getSettingsData(key) {
 
 function saveSettingsData(key, data) {
     // Assume that getSettingsData(key) has already been called for the same page
-    let settingsData = JSON.parse(localStorage.getItem("ResidueSettings"));
+    let settingsData = getGlobalSettings();
     settingsData[key] = data;  // Overwrite the data object
-    localStorage.setItem("ResidueSettings", JSON.stringify(settingsData));
+    saveGlobalSettings(settingsData);
 }
 
 function getATMStrike(chainData) {
