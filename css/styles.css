@@ -254,3 +254,29 @@ Hides the menu at `48em`, but modify this based on your app's needs.
   line-height: 20px;
   text-shadow: 1px 1px rgba(250,250,250,.3);
 }
+
+/* Tooltip container */
+.tooltip {
+    position: relative;
+    display: inline-block;
+    border-bottom: 1px dotted black; /* If you want dots under the hoverable text */
+}
+
+    /* Tooltip text */
+    .tooltip .tooltiptext {
+        visibility: hidden;
+        width: 200px;
+        background-color: white;
+        color: rgba(0,0,0,0.7);
+        text-align: center;
+        padding: 5px 0;
+        border-radius: 6px;
+        /* Position the tooltip text - see examples below! */
+        position: absolute;
+        z-index: 1;
+    }
+
+    /* Show the tooltip text when you mouse over the tooltip container */
+    .tooltip:hover .tooltiptext {
+        visibility: visible;
+    }
