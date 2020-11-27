@@ -11,24 +11,24 @@
     padding: 5px;
 }
 
-#option-table {
+#oidata-table {
     font-family: calibri, arial;
     width: 400px;
 }
 
-#option-table thead {
-    background-color: #8CCCF1;
-    height: 8px;
-    font-weight: bold;
-    text-align: center;
-}
+    #oidata-table thead {
+        background-color: #8CCCF1;
+        height: 8px;
+        font-weight: bold;
+        text-align: center;
+    }
 
-#option-table td {
-    height: 8px;
-    border: 1px solid #466E85;
-    width: 136px;
-    padding: 5px;
-}
+    #oidata-table td {
+        height: 8px;
+        border: 1px solid #466E85;
+        width: 136px;
+        padding: 5px;
+    }
 
 /* [THE BASE MESSAGE] */
 .bar {
