@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="/css/settings.css">
     <link rel="stylesheet" href="css/styles.css">
     <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <script src="/js/table.js"></script>
     <script src="/js/storage.js"></script>
     <script src="/js/settings.js"></script>
@@ -42,8 +43,12 @@
                         <a href="/oitrend/index.html" class="pure-menu-link">OI Trend</a>
                     </li>
 
-                    <li class="pure-menu-item"><a href="#" onclick="openSettings('OITrend')" class="pure-menu-link">Settings</a></li>
-                    <li class="pure-menu-item"><a href="/contact/index.html" class="pure-menu-link">Contact Us</a></li>
+                    <li class="pure-menu-item">
+                        <a href="#" onclick="openSettings('OITrend')" class="pure-menu-link">Settings</a>
+                    </li>
+                    <li class="pure-menu-item">
+                        <a href="/contact/index.html" class="pure-menu-link">Contact Us</a>
+                    </li>
                 </ul>
             </div>
         </div>
@@ -64,25 +69,42 @@
                             <option>BANKNIFTY</option>
                         </select>
                     </div>
-                    <div><label id="underlyingPrice"></label></div>
-                    <div><select id="expiry" style="width:120px; height:30px"></select></div>
-                    <div><button type="button" style="background-color: #8CCCF1; height:30px;" onClick="getChain()">GO</button></div>
-                    <div><label style="font-weight:bold">Market: </label><label id="market"></label></div>
+                    <div>
+                        <label id="underlyingPrice"></label>
+                    </div>
+                    <div>
+                        <select id="expiry" style="width:120px; height:30px"></select>
+                    </div>
+                    <div>
+                        <button type="button" style="background-color: #8CCCF1; height:30px;" onClick="getChain()">GO</button>
+                    </div>
+                    <div>
+                        <label style="font-weight:bold">Market: </label>
+                        <label id="market"></label>
+                    </div>
                     <div>
                         <label style="font-weight:bold">Data as of:</label>
                         <label id="lastUpdateTime"></label>
                     </div>
-                    <div><label style="font-weight:bold" for="duration">Refresh Duration (Mins) </label><input type="text" id="duration" style="width: 30px" value="5" onChange="updateDuration()"/></div>
+                    <div>
+                        <label style="font-weight:bold" for="duration">Refresh Duration (Mins) </label>
+                        <input type="text" id="duration" style="width: 30px" value="5" onChange="updateDuration()" />
+                    </div>
                     <div class="tooltip">
                         <span class="tooltiptext">Use Settings to select the Strikes</span>
-                        <label style="font-weight:bold">Using </label><label id="strikeCount"></label><label style="font-weight:bold"> Strikes</label>
+                        <label style="font-weight:bold">Using </label>
+                        <label id="strikeCount"></label>
+                        <label style="font-weight:bold"> Strikes</label>
                     </div>
-                    <div><button type="button" style="background-color: #ff0000; height:30px;" onClick="clearData()">RESET</button></div>
+                    <div>
+                        <button type="button" style="background-color: #ff0000; height:30px;" onClick="clearData()">RESET</button>
+                    </div>
                 </div>
                 <div class="bar error" id="alert">
                     <div class="close" onclick="this.parentElement.remove()">X</div>
                     <i class="ico">&#9747;</i> Error message
                 </div>
+                <div id="chart"></div>
                 <div id="settingsModal" class="modal"></div>
                 <table id="oidata-table" class="display" style="width:100%">
                 </table>
@@ -93,7 +115,7 @@
     </div>
 
     <script src="/js/ui.js" page="base"></script>
-    
+
     <script type="text/javascript">
 
         //document.getElementById('inputfile')
@@ -111,6 +133,7 @@
         var dtable = null;
         var refDuration = 5;   // Minutes
         var interval = null;
+        var chart;
 
         var worker = new Worker('/js/datafetch.js');
 
@@ -125,6 +148,55 @@
             if (refDuration < 1) refDuration = 1;
             interval = setInterval(getChain, refDuration * 60 * 1000);
 
+            var options = {
+                series: [],
+                legend: {
+                    show: true,
+                    position: "top"
+                },
+                xaxis: {
+                    type: "datetime",
+                    labels: {
+                        format: 'HH:mm'
+                    }
+                },
+                chart: {
+                    type: "line",
+                    zoom: {
+                        enabled: !1
+                    },
+                    toolbar: {
+                        show: false
+                    }
+                },
+                dataLabels: {
+                    enabled: false
+                },
+                noData: {
+                    text: "Fetching Data...",
+                    align: "center",
+                    verticalAlign: "middle",
+                    style: {
+                        fontSize: "18px",
+                        color: "blue"
+                    }
+                },
+                stroke: {
+                    show: true,
+                    curve: "smooth",
+                    width: 2
+                },
+                grid: {
+                    row: {
+                        colors: ["#f3f3f3", "transparent"],
+                        opacity: .5
+                    }
+                }
+            };
+
+            chart = new ApexCharts(document.querySelector("#chart"), options);
+            chart.render()
+
             getChain();
         });
 
@@ -137,7 +209,7 @@
             let dur = document.getElementById('duration').value;
             let paramNameDur = "RefreshDur" + document.getElementById('underlying').value;
             const oiTrendSettings = getSettingsData("OITrend");
-            
+
             if (oiTrendSettings) {
                 oiTrendSettings[paramNameDur] = dur;
             } else {
@@ -216,12 +288,32 @@
 
             let newTrendData = getTableData(dataset.allChains[expirySel], strikesToAdd);
             newTrendData.Idx = dataset['underlyingPrice'];
-            prevOITrendData.unshift(newTrendData);
+            if (prevOITrendData.length > 0 && compareTrendData(newTrendData, prevOITrendData[0])) {
 
-            dtable.load(prevOITrendData);
-
-            saveOITrendData(dataset.underlying, expirySel, prevOITrendData);
+                // Update the Time part only of the top record to indicate continuous updates
+                prevOITrendData[0].Time = newTrendData.Time;
+                dtable.load(prevOITrendData);
+                saveOITrendData(dataset.underlying, expirySel, prevOITrendData);
+            } else {
+                prevOITrendData.unshift(newTrendData);
+                dtable.load(prevOITrendData);
+                chart.appendSeries({
+                    data: [{ x: dataset["lastUpdateTime"], y: newTrendData.DiffChgOI} ]
+                })
+                saveOITrendData(dataset.underlying, expirySel, prevOITrendData);
+            }
         };
+
+        function compareTrendData(o1, o2) {
+            if (o1.Idx == o2.Idx &&
+                o1.CallOI == o2.CallOI &&
+                o1.CallChgOI == o2.CallChgOI &&
+                o1.PutOI == o2.PutOI &&
+                o1.PutChgOI == o2.PutChgOI) {
+                return true;
+            }
+            return false;
+        }
 
         worker.onerror = function (err) {
             console.log(err);
@@ -241,7 +333,6 @@
                     continue;
                 }
 
-                
                 let ce = selExpOptChn[strike]['CE'];
                 let pe = selExpOptChn[strike]['PE']
                 if (ce) {
