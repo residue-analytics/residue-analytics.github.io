@@ -284,7 +284,13 @@
             prevOITrendData = getOITrendData(dataset.underlying, expirySel);
             if (prevOITrendData == null) {
                 prevOITrendData = [];
-            }
+            } else {
+                // Load this data in the chart
+                for (let i = 0; i < prevOITrendData.length; i++) {
+                    chart.updateSeries({
+                        data: [{ x: prevOITrendData[i].Time, y: prevOITrendData[i].DiffChgOI }]
+                    });
+                }
 
             let newTrendData = getTableData(dataset.allChains[expirySel], strikesToAdd);
             newTrendData.Idx = dataset['underlyingPrice'];
