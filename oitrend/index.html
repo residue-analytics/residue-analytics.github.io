@@ -151,11 +151,14 @@
             var options = {
                 series: [],
                 legend: {
-                    show: true,
+                    show: false,
                     position: "top"
                 },
                 xaxis: {
                     type: "category",
+                    labels: {
+                        show: true
+                    }
                 },
                 chart: {
                     type: "line",
@@ -283,11 +286,17 @@
                 prevOITrendData = [];
             } else {
                 // Load this data in the chart
+                let chartData = [];
                 for (let i = 0; i < prevOITrendData.length; i++) {
-                    chart.appendSeries({
-                        data: [{ x: prevOITrendData[i].Time, y: prevOITrendData[i].DiffChgOI }]
-                    });
+                    chartData.unshift({ x: prevOITrendData[i].Time, y: prevOITrendData[i].DiffChgOI });
                 }
+
+                chart.updateOptions({
+                    series: [{
+                        name: "OI Trend",
+                        data: chartData
+                    }]
+                });
             }
 
             let newTrendData = getTableData(dataset.allChains[expirySel], strikesToAdd);
