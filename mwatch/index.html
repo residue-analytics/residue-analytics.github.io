@@ -37,13 +37,14 @@
                     </li>
 
                     <li class="pure-menu-item">
-                        <a href="/mwatch/index.html" class="pure-menu-link">Index Watch</a>
+                        <a href="/mwatch/index.html" class="pure-menu-link pure-menu-selected">Index Watch</a>
                     </li>
                     <li class="pure-menu-item">
                         <a href="/oitrend/index.html" class="pure-menu-link">OI Trend</a>
                     </li>
                     <li class="pure-menu-item"><a href="#" onclick="openSettings('MWatch')" class="pure-menu-link">Settings</a></li>
                     <li class="pure-menu-item"><a href="/contact/index.html" class="pure-menu-link">Contact Us</a></li>
+                    <li class="pure-menu-item menu-item-divided"><a href="/privacy/index.html" class="pure-menu-link">Privacy Policy</a></li>
                 </ul>
             </div>
         </div>
@@ -56,7 +57,6 @@
 
             <div class="content">
                 <!-- h2 class="content-subhead">Utilities</h2-->
-
                 <!-- input type="file" name="inputfile" id="inputfile" -->
                 <div class="flex-container">
                     <div>
@@ -87,7 +87,9 @@
             </div>
         </div>
     </div>
-
+    <div class="footer">
+        <p><a href="/disclaimer/index.html">Disclaimer</a></p>
+    </div>
     <script src="/js/ui.js" page="base"></script>
 
     <script type="text/javascript">
@@ -100,7 +102,7 @@
         $(document).ready(function (e) {
 
             dt = dynamicTable.config('option-table',
-                ['CEpchangeinOpenInterest', 'CEchangeinOpenInterest', 'CEopenInterest', 'CEltp', 'strikePrice', 'PEltp', 'PEopenInterest', 'PEchangeinOpenInterest', 'PEpchangeinOpenInterest' ],
+                ['CEpchangeinOpenInterest', 'CEchangeinOpenInterest', 'CEopenInterest', 'CEltp', 'strikePrice', 'PEltp', 'PEopenInterest', 'PEchangeinOpenInterest', 'PEpchangeinOpenInterest'],
                 ['% Chg OI', 'Chg OI', 'OI', 'LTP', 'Strike Price', 'LTP', 'OI', 'Chg OI', '% Chg OI'],
                 'Fetching the Data...');
 
@@ -169,7 +171,7 @@
         };
 
         function getTableData(curExpOptChn, displayStrikes) {
-            
+
             let dataArr = [];
             for (strike in curExpOptChn) {
                 if (displayStrikes.length > 0 && !displayStrikes.find((elem) => { return elem == strike })) {

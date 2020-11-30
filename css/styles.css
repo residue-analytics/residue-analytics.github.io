@@ -280,3 +280,13 @@ Hides the menu at `48em`, but modify this based on your app's needs.
     .tooltip:hover .tooltiptext {
         visibility: visible;
     }
+
+.footer {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    background-color: #eee;
+    color: black;
+    text-align: center;
+}

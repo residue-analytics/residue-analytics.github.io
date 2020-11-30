@@ -40,7 +40,7 @@
                         <a href="/mwatch/index.html" class="pure-menu-link">Index Watch</a>
                     </li>
                     <li class="pure-menu-item">
-                        <a href="/oitrend/index.html" class="pure-menu-link">OI Trend</a>
+                        <a href="/oitrend/index.html" class="pure-menu-link pure-menu-selected">OI Trend</a>
                     </li>
 
                     <li class="pure-menu-item">
@@ -49,6 +49,7 @@
                     <li class="pure-menu-item">
                         <a href="/contact/index.html" class="pure-menu-link">Contact Us</a>
                     </li>
+                    <li class="pure-menu-item menu-item-divided"><a href="/privacy/index.html" class="pure-menu-link">Privacy Policy</a></li>
                 </ul>
             </div>
         </div>
@@ -113,7 +114,9 @@
             </div>
         </div>
     </div>
-
+    <div class="footer">
+        <p><a href="/disclaimer/index.html">Disclaimer</a></p>
+    </div>
     <script src="/js/ui.js" page="base"></script>
 
     <script type="text/javascript">
@@ -312,7 +315,7 @@
                     }, {
                         name: "Diff OI",
                         data: chartData
-                        }]
+                    }]
                 });
             }
 
@@ -320,14 +323,14 @@
             newTrendData.Idx = dataset['underlyingPrice'];
             //if (prevOITrendData.length > 0 && compareTrendData(newTrendData, prevOITrendData[0])) {
 
-                // Update the Time part only of the top record to indicate continuous updates
-                //prevOITrendData[0].Time = newTrendData.Time;
-                //dtable.load(prevOITrendData);
-                //chart.appendSeries({
-                //    name: 'Diff Chg OI',
-                //    data: [{ x: newTrendData.EpochTime, y: newTrendData.DiffChgOI }]
-                //});
-                //saveOITrendDataStore(dataset.underlying, expirySel, prevOITrendData);
+            // Update the Time part only of the top record to indicate continuous updates
+            //prevOITrendData[0].Time = newTrendData.Time;
+            //dtable.load(prevOITrendData);
+            //chart.appendSeries({
+            //    name: 'Diff Chg OI',
+            //    data: [{ x: newTrendData.EpochTime, y: newTrendData.DiffChgOI }]
+            //});
+            //saveOITrendDataStore(dataset.underlying, expirySel, prevOITrendData);
             //} else {
             //    prevOITrendData.unshift(newTrendData);
 
