@@ -151,11 +151,12 @@
             var options = {
                 series: [],
                 legend: {
-                    show: false,
+                    show: true,
                     position: "top"
                 },
                 xaxis: {
-                    type: "category",
+                    type: "datetime",
+                    //range: 28800000,     // 8 hours in msecs
                     labels: {
                         show: true
                     }
@@ -180,6 +181,9 @@
                         fontSize: "18px",
                         color: "blue"
                     }
+                },
+                markers: {
+                    size: 5
                 },
                 stroke: {
                     show: true,
@@ -281,40 +285,62 @@
             document.getElementById('strikeCount').innerHTML = strikesToAdd.length;
 
             let prevOITrendData = [];
-            prevOITrendData = getOITrendData(dataset.underlying, expirySel);
+            prevOITrendData = getOITrendDataStore(dataset.underlying, expirySel);
             if (prevOITrendData == null) {
                 prevOITrendData = [];
             } else {
                 // Load this data in the chart
                 let chartData = [];
+                let chartDataChg = [];
                 for (let i = 0; i < prevOITrendData.length; i++) {
-                    chartData.unshift({ x: prevOITrendData[i].Time, y: prevOITrendData[i].DiffChgOI });
+                    if (prevOITrendData[i].EpochTime == null) {
+                        // Old cached Data, we need to convert to EpochTime and then use for chart
+                        let oldDateTime = "27-Nov-2020 " + prevOITrendData[i].Time;
+                        chartData.unshift({ x: new Date(oldDateTime).getTime(), y: prevOITrendData[i].DiffOI });
+                        chartDataChg.unshift({ x: new Date(oldDateTime).getTime(), y: prevOITrendData[i].DiffChgOI });
+                    } else {
+                        chartData.unshift({ x: prevOITrendData[i].EpochTime, y: prevOITrendData[i].DiffOI });
+                        chartDataChg.unshift({ x: prevOITrendData[i].EpochTime, y: prevOITrendData[i].DiffChgOI });
+                    }
                 }
 
                 chart.updateOptions({
                     series: [{
-                        name: "OI Trend",
+                        name: "Diff Chg OI",
+                        data: chartDataChg
+                    }, {
+                        name: "Diff OI",
                         data: chartData
-                    }]
+                        }]
                 });
             }
 
             let newTrendData = getTableData(dataset.allChains[expirySel], strikesToAdd);
             newTrendData.Idx = dataset['underlyingPrice'];
-            if (prevOITrendData.length > 0 && compareTrendData(newTrendData, prevOITrendData[0])) {
+            //if (prevOITrendData.length > 0 && compareTrendData(newTrendData, prevOITrendData[0])) {
 
                 // Update the Time part only of the top record to indicate continuous updates
-                prevOITrendData[0].Time = newTrendData.Time;
-                dtable.load(prevOITrendData);
-                saveOITrendData(dataset.underlying, expirySel, prevOITrendData);
-            } else {
-                prevOITrendData.unshift(newTrendData);
-                dtable.load(prevOITrendData);
-                chart.appendSeries({
-                    data: [{ x: newTrendData.Time, y: newTrendData.DiffChgOI }]
-                })
-                saveOITrendData(dataset.underlying, expirySel, prevOITrendData);
-            }
+                //prevOITrendData[0].Time = newTrendData.Time;
+                //dtable.load(prevOITrendData);
+                //chart.appendSeries({
+                //    name: 'Diff Chg OI',
+                //    data: [{ x: newTrendData.EpochTime, y: newTrendData.DiffChgOI }]
+                //});
+                //saveOITrendDataStore(dataset.underlying, expirySel, prevOITrendData);
+            //} else {
+            //    prevOITrendData.unshift(newTrendData);
+
+            //}
+            prevOITrendData.unshift(newTrendData);
+            dtable.load(prevOITrendData);
+            chart.appendSeries({
+                name: "Diff Chg OI ",
+                data: [{ x: newTrendData.EpochTime, y: newTrendData.DiffChgOI }]
+            }, {
+                name: "Diff OI",
+                data: [{ x: newTrendData.EpochTime, y: newTrendData.DiffOI }]
+            });
+            saveOITrendDataStore(dataset.underlying, expirySel, prevOITrendData);
         };
 
         function compareTrendData(o1, o2) {
@@ -359,6 +385,7 @@
                 }
             }
 
+            dataObj.EpochTime = Date.now();
             dataObj.Time = new Date().toLocaleTimeString();
             dataObj.DiffOI = dataObj.PutOI - dataObj.CallOI;
             dataObj.DiffChgOI = dataObj.PutChgOI - dataObj.CallChgOI;
@@ -379,7 +406,7 @@
             if (select.selectedIndex != -1) {
                 expirySel = select.options[select.selectedIndex].text;
             }
-            saveOITrendData(underlying, expirySel, []);
+            saveOITrendDataStore(underlying, expirySel, []);
             getChain();
         }
 

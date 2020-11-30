@@ -27,7 +27,7 @@ function saveCurrentChain(chain) {
     }
 }
 
-function getOITrendData(underlying, expiry) {
+function getOITrendDataStore(underlying, expiry) {
     let data = JSON.parse(localStorage.getItem("OITrendData"));
     underlying = underlying.toLowerCase();
     expiry = expiry.toLowerCase();
@@ -43,7 +43,7 @@ function getOITrendData(underlying, expiry) {
     return data[underlying][expiry];
 }
 
-function saveOITrendData(underlying, expiry, oidata) {
+function saveOITrendDataStore(underlying, expiry, oidata) {
     if (typeof (Storage) !== "undefined") {
         let data = JSON.parse(localStorage.getItem("OITrendData"));
         underlying = underlying.toLowerCase();
