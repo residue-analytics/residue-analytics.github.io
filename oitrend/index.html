@@ -380,12 +380,12 @@
                 let pe = selExpOptChn[strike]['PE']
                 if (ce) {
                     dataObj.CallOI += ce["openInterest"];
-                    dataObj.CallChgOI = ce["changeinOpenInterest"];
+                    dataObj.CallChgOI += ce["changeinOpenInterest"];
                 }
 
                 if (pe) {
                     dataObj.PutOI += pe["openInterest"];
-                    dataObj.PutChgOI = pe["changeinOpenInterest"];
+                    dataObj.PutChgOI += pe["changeinOpenInterest"];
                 }
             }
 
