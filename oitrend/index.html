@@ -332,8 +332,13 @@
                     }]
                 });
             }
-
-            let newTrendData = getTableData(dataset.allChains[expirySel], strikesToAdd);
+            let lotSize = 0;
+            if (dataset.underlying == "NIFTY") {
+                lotSize = 75;
+            } else if (dataset.underlying == "BANKNIFTY") {
+                lotSize = 25;
+            }
+            let newTrendData = getTableData(dataset.allChains[expirySel], strikesToAdd, lotSize);
             newTrendData.Idx = dataset['underlyingPrice'];
             //if (prevOITrendData.length > 0 && compareTrendData(newTrendData, prevOITrendData[0])) {
 
@@ -382,7 +387,7 @@
             //alertMessage("Warning", 3, "&#9888;");
         };
 
-        function getTableData(selExpOptChn, strikesToAdd) {
+        function getTableData(selExpOptChn, strikesToAdd, lotSize) {
 
             let dataObj = { Time: "", Idx: "", CallOI: 0, CallChgOI: 0, PutOI: 0, PutChgOI: 0, DiffOI: 0, DiffChgOI: 0, Signal: "" };
             for (strike in selExpOptChn) {
@@ -393,13 +398,13 @@
                 let ce = selExpOptChn[strike]['CE'];
                 let pe = selExpOptChn[strike]['PE']
                 if (ce) {
-                    dataObj.CallOI += ce["openInterest"];
-                    dataObj.CallChgOI += ce["changeinOpenInterest"];
+                    dataObj.CallOI += ce["openInterest"] * lotSize;
+                    dataObj.CallChgOI += ce["changeinOpenInterest"] * lotSize;
                 }
 
                 if (pe) {
-                    dataObj.PutOI += pe["openInterest"];
-                    dataObj.PutChgOI += pe["changeinOpenInterest"];
+                    dataObj.PutOI += pe["openInterest"] * lotSize;
+                    dataObj.PutChgOI += pe["changeinOpenInterest"] * lotSize;
                 }
             }
 
