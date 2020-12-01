@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Nifty Weekly, Monthly and Yearly range calculator based on current India VIX">
-  <title>Responsive Side Menu &ndash; Layout Examples &ndash; Pure</title>
+  <title>Index Range Calculator</title>
   <link rel="stylesheet" href="https://unpkg.com/purecss@2.0.3/build/pure-min.css"
     integrity="sha384-cg6SkqEOCV1NbJoCu11+bm0NvBRc8IYLRGXkmNrqUBfTjmMYwNKPWBTIKyw9mHNJ" crossorigin="anonymous">
   <link rel="stylesheet" href="https://unpkg.com/purecss@2.0.3/build/grids-responsive-min.css" />
@@ -51,22 +51,25 @@
             </div>
 
             <div class="content">
-                <p>
-                    <form class="pure-form">
+                <br />
+                    <form class="pure-form" style="display: flex; justify-content: space-evenly; flex-wrap: wrap">
+                        <select id="underlying" class="pure-input-rounded" style="height:36px; margin:4px" onchange="init_input()">
+                            <option selected>NIFTY</option>
+                            <option>BANKNIFTY</option>
+                        </select>
                         <!-- label for="index-cur">Index</label -->
-                        <input type="text" id="index-cur" size="13" class="pure-input-rounded" oninput="update_table()"
+                        <input type="text" id="index-cur" size="13" class="pure-input-rounded" style="margin: 4px" oninput="update_table()"
                                placeholder="Current Index" value="11820" />
                         <!-- label for="india-vix">India VIX</label -->
-                        <input type="text" id="india-vix" size="13" class="pure-input-rounded" oninput="update_table()"
+                        <input type="text" id="india-vix" size="13" class="pure-input-rounded" style="margin: 4px" oninput="update_table()"
                                placeholder="India VIX" value="23.37" />
-                        <button type="button" class="pure-button pure-button-primary button-round" onClick="update_table()">></button>
+                        <button type="button" class="pure-button pure-button-primary button-round" style="margin: 4px" onClick="update_table()">></button>
                         <span class="pure-form-message error-text" id="error-msg" hidden>Error Message</span>
                     </form>
-                </p>
 
                 <br />
 
-                <table class="pure-table">
+                <table class="pure-table" width="100%">
                     <thead>
                         <tr>
                             <th></th>
@@ -121,7 +124,7 @@
         <div class="footer">
             <p><a href="/disclaimer/index.html">Disclaimer</a></p>
         </div>
-        <script onload="update_table()" src="/range/js/calc.js"></script>
+        <script onload="init_input()" src="js/calc.js"></script>
         <script src="/js/ui.js" page="range"></script>
     </div>
 </body>

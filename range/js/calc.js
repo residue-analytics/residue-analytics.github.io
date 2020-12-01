@@ -1,3 +1,30 @@
+var worker = new Worker('/js/datafetch.js');
+
+worker.onmessage = function (event) {
+    if (event.data.status != 200) {
+        let error_msg = document.getElementById("error-msg");
+        if (error_msg.hidden == true) {
+            error_msg.hidden = false;
+            error_msg.innerHTML = event.data.message + "[" + event.data.status + "]";
+        }
+        return;
+    }
+
+    dataset = event.data;
+    document.getElementById("index-cur").value = dataset["underlyingPrice"];
+    document.getElementById("india-vix").value = dataset["indiaVIX"];
+    update_table();
+};
+
+worker.onerror = function (err) {
+    let error_msg = document.getElementById("error-msg");
+    console.log(err);
+    if (error_msg.hidden == true) {
+        error_msg.hidden = false;
+        error_msg.innerHTML = err;
+    }
+};
+
 function calc_range(T, index, vix) {
   if (isNaN(index) || isNaN(vix) || index <= 0 || vix <= 0) {
     throw new Error("Index and VIX cannot be Empty, (-)ve or Zero");
@@ -42,13 +69,19 @@ function update_ranges(index, vix) {
   document.getElementById("oth-low").innerHTML = Math.round(range.low);
 }
 
-function update_table() {
-  try {
+function init_input() {
     let error_msg = document.getElementById("error-msg");
+    error_msg.hidden = true;
+
+    worker.postMessage(document.getElementById('underlying').value);
+}
+
+function update_table() {
+  let error_msg = document.getElementById("error-msg");
+  try {
     error_msg.hidden = true;
     update_ranges( document.getElementById("index-cur").value, document.getElementById("india-vix").value );
   } catch (excp) {
-    let error_msg = document.getElementById("error-msg");
     if (error_msg.hidden == true) {
       error_msg.hidden = false;
       error_msg.innerHTML = excp.message;
