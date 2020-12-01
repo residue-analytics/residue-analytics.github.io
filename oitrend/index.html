@@ -144,7 +144,7 @@
 
             dtable = dynamicTable.config('oidata-table',
                 ['Time', 'Idx', 'CallOI', 'CallChgOI', 'PutOI', 'PutChgOI', 'DiffOI', 'DiffChgOI', 'Signal'],
-                ['Time', 'Idx', 'Call OI', 'Call Chg OI', 'Put OI', 'Put Chg OI', 'Diff OI', 'Diff Chg OI', 'Signal'],
+                ['Time', 'Idx', 'Call OI<br>(COI)', 'Call Chg OI<br>(CCOI)', 'Put OI<br>(POI)', 'Put Chg OI<br>(PCOI)', 'Diff OI<br>(POI-COI)', 'Diff Chg OI<br>(PCOI-CCOI)', 'Signal'],
                 'Fetching the Data...');
 
             refDuration = getRefreshDuration();
@@ -180,10 +180,12 @@
                 chart: {
                     type: "line",
                     zoom: {
-                        enabled: !1
+                        type: "x",
+                        enabled: true,
+                        autoScaleYaxis: true
                     },
                     toolbar: {
-                        show: false
+                        show: true
                     }
                 },
                 dataLabels: {
