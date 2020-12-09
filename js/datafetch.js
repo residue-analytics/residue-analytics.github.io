@@ -1,4 +1,4 @@
-const host = "https://myapp.residue.workers.dev";
+const host = "https://nbnf.residue.workers.dev";
 //const host = "http://localhost:8787";
 const nifty = "/nifty";
 const banknifty = "/banknifty";
