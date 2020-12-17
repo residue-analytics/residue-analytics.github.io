@@ -1,5 +1,5 @@
-//const host = "https://nbnf.residue.workers.dev";
-const host = "http://localhost:8787";
+const host = "https://nbnf.residue.workers.dev";
+//const host = "http://localhost:8787";
 const nifty = "/nifty";
 const banknifty = "/banknifty";
 
