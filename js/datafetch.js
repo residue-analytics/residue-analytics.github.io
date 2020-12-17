@@ -1,5 +1,5 @@
-const host = "https://nbnf.residue.workers.dev";
-//const host = "http://localhost:8787";
+//const host = "https://nbnf.residue.workers.dev";
+const host = "http://localhost:8787";
 const nifty = "/nifty";
 const banknifty = "/banknifty";
 
@@ -84,23 +84,51 @@ function convInt(intArr) {
 }
 
 function postJSON(jsonStr) {
-    var tableData;
-    jsonObj = JSON.parse(jsonStr);
+  var tableData;
+  var successData = {}
+  jsonObj = JSON.parse(jsonStr);
 
-    var successData = {
-        "status": 200,
-        "message": "Success",
-        "market": jsonObj.marketStatus,
-        "underlying": jsonObj.underlying,
-        "underlyingPrice": jsonObj.underlyingValue,
-        "indiaVIX": jsonObj["indVIX"],
-        "lastUpdateTime": jsonObj.timestamp,
-        "expiries": jsonObj.expiryDates.sort( (a, b) => { return new Date(a) - new Date(b) } ),
-        "strikes": jsonObj.strikePrices.sort( (a, b) => { return parseInt(a) - parseInt(b) } ),
-        "allChains": getAllChains(jsonObj.data)
+  if (jsonObj["chain"]) {
+    // New Structure
+    let chain = JSON.parse(jsonObj["chain"])
+    let records = chain["records"]
+    let data = records["data"]
+    let underlying = ""
+    if (data[0]['CE']) {
+      underlying = data[0]['CE']['underlying']
+    } else {
+      underlying = data[0]['PE']['underlying']
+    }
+
+    successData = {
+      "status": 200,
+      "message": "Success",
+      "market": jsonObj.marketStatus,
+      "underlying": underlying,
+      "underlyingPrice": records.underlyingValue,
+      "indiaVIX": jsonObj["indVIX"],
+      "lastUpdateTime": records.timestamp,
+      "expiries": records.expiryDates.sort((a, b) => { return new Date(a) - new Date(b) }),
+      "strikes": records.strikePrices.sort((a, b) => { return parseInt(a) - parseInt(b) }),
+      "allChains": getAllChains(data)
     };
+  } else {
 
-    postMessage(successData);
+    successData = {
+      "status": 200,
+      "message": "Success",
+      "market": jsonObj.marketStatus,
+      "underlying": jsonObj.underlying,
+      "underlyingPrice": jsonObj.underlyingValue,
+      "indiaVIX": jsonObj["indVIX"],
+      "lastUpdateTime": jsonObj.timestamp,
+      "expiries": jsonObj.expiryDates.sort((a, b) => { return new Date(a) - new Date(b) }),
+      "strikes": jsonObj.strikePrices.sort((a, b) => { return parseInt(a) - parseInt(b) }),
+      "allChains": getAllChains(jsonObj.data)
+    };
+  }
+
+  postMessage(successData);
 }
 
 function postError(status, message) {
