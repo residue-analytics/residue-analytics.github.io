@@ -11,7 +11,7 @@
 
   <meta name="description" content="Data Viewer">
   <title>Data Viewer</title>
-  
+
   <!--Plugin CSS file with desired skin-->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/ion-rangeslider/2.3.1/css/ion.rangeSlider.min.css" />
 
@@ -22,6 +22,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ion-rangeslider/2.3.1/js/ion.rangeSlider.min.js"></script>
 
   <script src="//cdn.jsdelivr.net/npm/pouchdb@7.2.1/dist/pouchdb.min.js"></script>
+
   <script src="/js/classes.js"></script>
   <script src="/js/dbaccess.js"></script>
 </head>
@@ -32,7 +33,6 @@
     <div class="container">
       <div class="row text-center">
         <h1>Data Viewer</h1>
-        <!-- h2>A subtitle for your page goes here</h2 -->
       </div>
 
 
@@ -48,10 +48,10 @@
         </div>
       </div>
 
-      <div class="row row-cols-md-4 g-3 align-items-center mb-3 justify-content-evenly">
+      <div class="row row-cols-md-4 g-3 mb-3">
         <div class="col-md visually-hidden">
           <div class="form-floating">
-            <select class="form-select" id="exchange" onchange="updateLists(this.id, this.value)">
+            <select class="form-select" id="exchange" onchange="pageUpdateLists(this.id, this.value)">
             </select>
             <label for="exchange">Exchange</label>
           </div>
@@ -59,7 +59,7 @@
 
         <div class="col-md">
           <div class="form-floating">
-            <select class="form-select" id="instrument" onchange="updateLists(this.id, this.value)">
+            <select class="form-select" id="instrument" onchange="pageUpdateLists(this.id, this.value)">
             </select>
             <label class="form-label" for="instrument">Instrument</label>
           </div>
@@ -67,7 +67,7 @@
 
         <div class="col-md">
           <div class="form-floating">
-            <select class="form-select" id="underlying" onchange="updateLists(this.id, this.value)">
+            <select class="form-select" id="underlying" onchange="pageUpdateLists(this.id, this.value)">
             </select>
             <label class="form-label" for="underlying">Underlying</label>
           </div>
@@ -75,7 +75,7 @@
 
         <div class="col-md">
           <div class="form-floating">
-            <select class="form-select" id="expiries" onchange="updateLists(this.id, this.value)"></select>
+            <select class="form-select" id="expiries" onchange="pageUpdateLists(this.id, this.value)"></select>
             <label class="form-label" for="expiries">Expiry</label>
           </div>
         </div>
@@ -90,6 +90,7 @@
         <div class="col-md">
           <div class="form-floating">
             <select class="form-select" id="ce_pe">
+              <option>Both</option>
               <option selected>CE</option>
               <option>PE</option>
             </select>
@@ -99,19 +100,42 @@
 
         <div class="col-md">
           <div class="form-floating">
-            <select class="form-select" id="days" onchange="updateLists(this.id, this.value)"></select>
+            <select class="form-select" id="days" onchange="pageUpdateLists(this.id, this.value)"></select>
             <label class="form-label" for="days">Date</label>
           </div>
         </div>
 
-          <div class="col-md">
-            <button type="button" class="btn btn-primary" onclick="getRecords()">GO</button>
+        <div class="col-md">
+          <div class="form-floating">
+            <input type="text" class="form-control" id="quantity" placeholder="1">
           </div>
         </div>
 
+        <div class="col-md">
+          <button type="button" id="fetch" class="btn btn-primary" onclick="getRecords()">FETCH</button>
+        </div>
+
+        <div class="col-md">
+          <button type="button" id="buy" class="btn btn-primary" onclick="addStrategy(this.id, 'BUY')">BUY</button>
+        </div>
+
+        <div class="col-md">
+          <button type="button" id="sell" class="btn btn-primary" onclick="addStrategy(this.id, 'SELL')">SELL</button>
+        </div>
+
+        <div class="col-md">
+          <button type="button" id="check" class="btn btn-primary" onclick="checkStrategy(this.id)">CHECK</button>
+        </div>
+
+      </div>
+
       <div class="row mb-3">
+        <div class="col-4 ms-3 form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="timesliderThumbs" onclick="switchThumbs()">
+          <label class="form-check-label" for="timesliderThumbs">Time Range</label>
+        </div>
         <div>
-          <input type="text" id="example_id" name="example_name" value="" />
+          <input type="text" id="timeslider" name="TimeSlider" value="" />
         </div>
       </div>
 
@@ -124,13 +148,16 @@
         <div class="col-auto">
           <button type="submit" class="btn btn-primary d-inline mb-3" onclick="evaluateScript()">GO</button>
         </div>
-
       </div>
 
       <hr />
 
-      <pre class="text-break" style="white-space:normal" id="output"></pre>
+      <div id="chart"></div>
 
+      <pre class="text-break" style="white-space:normal" id="output"></pre>
+      <div id="datatables">
+        
+      </div>
     </div>
   </div>
 
@@ -138,10 +165,13 @@
 
       var worker = new Worker('js/dataworker.js');
       var cacheSyms = null;
-      
-      $("#example_id").ionRangeSlider({
+      var strategy = new Strategy("tester");
+
+      var thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
+
+      $("#timeslider").ionRangeSlider({
         skin: "round",
-        type: "double",
+        type: thumbs,
         grid: true,
         min: UIUtils.dateToTS(new Date("2021-01-01T09:15:00+05:30")),
         max: UIUtils.dateToTS(new Date("2021-01-01T15:30:00+05:30")),
@@ -160,9 +190,16 @@
         UIUtils.updSelectDropdown("exchange", symList.getAs());
         UIUtils.rmSpinner("exchange");
         let exc = document.getElementById("exchange").options[0].text;
-        updateLists("exchange", exc);
-        UIUtils.updAutocomplete(symList, "autocompleteOptions");
+        pageUpdateLists("exchange", exc);
+        UIUtils.updAutocomplete(cacheSyms, "autocompleteOptions");
       });
+
+      function switchThumbs() {
+
+        let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
+
+        UIUtils.updateDatetimeSlider("timeslider", "days", thumbs === "single");
+      }
 
       function evaluateScript() {
         console.log("Evaluating");
@@ -182,90 +219,79 @@
         }
       }
 
-      function updateLists(selectID, selectedVal) {
-        let excSel = instSel = ulySel = leaf = null;
-        switch (selectID) {
-          case "exchange":
-            let exc = selectedVal;
-            UIUtils.updSelectDropdown("instrument", cacheSyms.getBs(exc));
-            let inst = document.getElementById("instrument").options[0].text;
-            UIUtils.updSelectDropdown("underlying", Array.from(cacheSyms.getCs(exc, inst), val => val.c));
-            UIUtils.rmSpinner("instrument");
-            selectedVal = inst;  // For the next case, we are not break-ing
-          case "instrument":
-            excSel = document.getElementById("exchange");
-            UIUtils.updSelectDropdown("underlying", Array.from(cacheSyms.getCs(excSel.options[excSel.selectedIndex].text, selectedVal), val => val.c));
-            UIUtils.rmSpinner("underlying");
-            selectedVal = document.getElementById("underlying").options[0].text;
-          case "underlying":
-            excSel = document.getElementById("exchange");
-            instSel = document.getElementById("instrument");
-            UIUtils.addSpinner("expiries");
-            leaf = cacheSyms.getLeaf(excSel.options[excSel.selectedIndex].text, instSel.options[instSel.selectedIndex].text, selectedVal);
-            DBFacade.fetchLists(leaf).then(data => {
-              //console.log(data);
-              if (data.days) {
-                UIUtils.updSelectDropdown("days", data.days, datefmt = true);
-                UIUtils.updateDatetimeSlider("example_id", "days");
-              }
-              if (data.exps) {
-                UIUtils.updSelectDropdown("expiries", data.exps, datefmt = true);
-                updateLists("expiries", data.exps[0]);
-              }
-              UIUtils.rmSpinner("expiries");
-            }).catch(error => {
-              console.log(error);
-              UIUtils.rmSpinner("expiries");
-              UIUtils.showAlert("erroralert", error);
-            });
+      function pageUpdateLists(selectID, selectedVal) {
+        let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
 
-            break;
-          case "expiries":
-            excSel = document.getElementById("exchange");
-            instSel = document.getElementById("instrument");
-            ulySel = document.getElementById("underlying");
+        UIUtils.updateLists(cacheSyms, selectID, selectedVal, "exchange", "instrument", "underlying",
+          "expiries", "strikes", "ce_pe", "days", "timeslider", "erroralert", "autocompleteOptions",
+          thumbs === "single");
+      }
 
-            UIUtils.addSpinner("strikes");
-            UIUtils.addSpinner("days");
-            leaf = cacheSyms.getLeaf(excSel.value, instSel.value, ulySel.value);
+      function addStrategy(id, action) {
+        UIUtils.addSpinner(id);
+        let output = document.getElementById("output");
+        let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
 
-            DBFacade.fetchLists(leaf, selectedVal).then(data => {
-              //console.log(data);
-              if (data.days) {
-                UIUtils.updSelectDropdown("days", data.days, datefmt = true);
-              }
-              if (data.stks) {
-                UIUtils.updSelectDropdown("strikes", data.stks);
-              }
-              updateLists("days", data.days[0]);
-              UIUtils.rmSpinner("strikes");
-              UIUtils.rmSpinner("days");
-              UIUtils.updateDatetimeSlider("example_id", "days");
-            }).catch(error => {
-              console.log(error);
-              UIUtils.rmSpinner("strikes");
-              UIUtils.rmSpinner("days");
-              UIUtils.showAlert("erroralert", error);
-            });
-            break;
-          case "days":
-            UIUtils.updateDatetimeSlider("example_id", "days");
-        }
+        UIUtils.getRecords("exchange", "instrument", "underlying",
+          "expiries", "strikes", "ce_pe", "timeslider", thumbs === "single").then(response => {
+            //output.innerHTML = JSON.stringify(response);
+            let sym = cacheSyms.getLeaf(document.getElementById("exchange").value,
+              document.getElementById("instrument").value,
+              document.getElementById("underlying").value);
+
+            let records = new RecordList(sym, response).raw;
+            output.innerHTML = JSON.stringify(records[0]);
+
+            let leg = new StrategyLeg(sym, document.getElementById("expiries").value,
+              action, document.getElementById("quantity").value, records[0].ltp, null,
+              document.getElementById("strikes").value, document.getElementById("ce_pe").value);
+
+            console.log(JSON.stringify(leg));
+            console.log("leg value: " + leg.value);
+            console.log(strategy.add(leg));
+            console.log(strategy.value);
+
+            new DataTable().loadStrategy("datatables", strategy);
+
+            UIUtils.rmSpinner(id);
+          }).catch(error => {
+            
+            output.innerHTML = JSON.stringify(error);
+            console.log(error);
+            UIUtils.rmSpinner(id);
+            UIUtils.showAlert("erroralert", error);
+          });
+      }
+
+      function checkStrategy(id) {
+        UIUtils.addSpinner(id);
+        let output = document.getElementById("output");
+        let rangeSlider = $("#timeslider").data('ionRangeSlider');
+
+        strategy.updateEarnings(rangeSlider.result.from,
+          function (value) { console.log(value); UIUtils.rmSpinner(id); },
+          function (reasons) { console.log(reasons); output.innerHTML = JSON.stringify(reasons); UIUtils.rmSpinner(id); }
+        );
       }
 
       function getRecords() {
-        let output = document.getElementById('output');
-        let rangeSlider = $("#example_id").data('ionRangeSlider');
+        UIUtils.addSpinner("fetch");
+        let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
+        UIUtils.getRecords("exchange", "instrument", "underlying",
+          "expiries", "strikes", "ce_pe", "timeslider", thumbs === "single").then(response => {
+            //output.innerHTML = JSON.stringify(response);
+            let leaf = cacheSyms.getLeaf(document.getElementById("exchange").value,
+              document.getElementById("instrument").value,
+              document.getElementById("underlying").value);
 
-        DBFacade.fetchRecs(document.getElementById("exchange").value, document.getElementById("instrument").value,
-          document.getElementById("underlying").value, document.getElementById("expiries").value,
-          null, [document.getElementById("strikes").value], [document.getElementById("ce_pe").value],
-          Math.floor(rangeSlider.result.from / 60000) * 60, Math.floor(rangeSlider.result.to / 60000) * 60
-        ).then(response => {
-            output.innerHTML = JSON.stringify(response);
+            new DataTable().loadTable("datatables", new RecordList(leaf, response));
+
+            UIUtils.rmSpinner("fetch");
           }).catch(error => {
+            let output = document.getElementById("output");
             output.innerHTML = JSON.stringify(error);
             console.log(error);
+            UIUtils.rmSpinner("fetch");
             UIUtils.showAlert("erroralert", error);
           });
       }
@@ -305,19 +331,6 @@
         }
         saveOITrendDataStore(underlying, expirySel, []);
         getChain();
-      }
-
-      // https://code-boxx.com/simple-css-error-messages/
-      function alertMessage(message) {
-        // alertmessage() : enable a notification bar
-        // message : notification message
-
-        let alertNode = document.getElementById("alert");
-        alertNode.innerHTML = message;
-        alertNode.style.display = "block";
-        setTimeout(function () {
-          alertNode.style.display = 'none';
-        }, 5000);
       }
     </script>
     <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js" integrity="sha384-q2kxQ16AaE6UbzuKqyBE9/u/KzioAlnx2maXQHiDX9d4/zp8Ok3f+M7DPm+Ib6IU" crossorigin="anonymous"></script>

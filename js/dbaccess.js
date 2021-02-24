@@ -9,8 +9,14 @@ class UIUtils {
 
   static updAutocomplete(symList, nodeID) {
     let parent = document.getElementById(nodeID);
+    if (!parent) {
+      return
+    }
+
     //parent.options.length = 0;
-    for (const optVal of symList.getAutocompleteList()) {
+    let autoList = symList.getAutocompleteList();
+    console.log(autoList);
+    for (const optVal of autoList) {
       let optNode = document.createElement("option");
       optNode.value = optVal;
       parent.appendChild(optNode);
@@ -18,7 +24,7 @@ class UIUtils {
     }
   }
 
-  static updSelectDropdown(nodeID, iterOarr, datefmt=false) {
+  static updSelectDropdown(nodeID, iterOarr, datefmt = false, firstOptVal = null, firstOptText = null) {
     let select = document.getElementById(nodeID);
     let selOption = null;
 
@@ -33,6 +39,27 @@ class UIUtils {
     }
 
     select.options.length = 0;   // Remove all child option nodes
+
+    if (firstOptVal || firstOptText) {
+      let firstNode = document.createElement("option");
+      if (firstOptVal) {
+        firstNode.value = firstOptVal;
+      } else {
+        firstNode.text = firstOptText;
+      }
+      if (firstOptText) {
+        firstNode.text = firstOptText;
+      } else {
+        firstNode.text = firstOptVal;
+      }
+
+      if (preselect !== null && preselect === firstNode.value) {
+        firstNode.selected = true;
+      }
+
+      select.appendChild(firstNode);
+    }
+
     for (let i = 0; i < valArr.length; i++) {
       let optNode = document.createElement("option");
       let value = valArr[i].toString();
@@ -43,9 +70,9 @@ class UIUtils {
         optNode.text = value;
       }
 
-      if (preselect === null && i == 0) {
+      if (preselect === null && i === 0) {
         optNode.selected = true;
-      } else if (preselect !== null && preselect === optNode.text) {
+      } else if (preselect !== null && preselect === optNode.value) {
         optNode.selected = true;
       }
 
@@ -57,9 +84,16 @@ class UIUtils {
     // nodeID is the node that is being updated currently
     // Spinner is added to the parent of this node
     const child = document.getElementById(nodeID);
-    const parent = child.parentElement;
-    const spinner = document.createElement('div');
-    spinner.className = 'spinner-border spinner-border-sm';
+    let parent = null;
+    if (child.type === "button") {
+      child.disabled = true;
+      parent = child;
+    } else {
+      parent = child.parentElement;
+    }
+
+    const spinner = document.createElement('span');
+    spinner.className = 'spinner-border spinner-border-sm ms-2';
     spinner.role = 'status';
     spinner.innerHTML = `<span class="visually-hidden" > Loading...</span >`;
     //parent.insertBefore(spinner, child);
@@ -67,7 +101,15 @@ class UIUtils {
   }
 
   static rmSpinner(nodeID) {
-    const parent = document.getElementById(nodeID).parentElement;
+    const child = document.getElementById(nodeID);
+    let parent = null;
+    if (child.type === "button") {
+      child.disabled = false;
+      parent = child;
+    } else {
+      parent = child.parentElement;
+    }
+
     const spinner = parent.querySelector('.spinner-border');
     if (spinner) {
       parent.removeChild(spinner);
@@ -81,28 +123,170 @@ class UIUtils {
     alert.role = 'alert';
 
     alert.innerHTML = '<strong>Holy guacamole!</strong> ' + message.toString() +
-                       '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
+      '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
 
     parentDiv.appendChild(alert);
   }
 
-  static updateDatetimeSlider(sliderID, daysNodeID) {
+  static updateDatetimeSlider(sliderID, daysNodeID, singleThumb=false) {
     let rangeSlider = $("#" + sliderID).data('ionRangeSlider');
     //let dateRange = UIUtils.datetimeRange(daysNodeID);
     const select = document.getElementById(daysNodeID);
     const date = select.value.substr(0, 4) + "-" + select.value.substr(4, 2) + "-" + select.value.substr(6, 2);
 
+    let thumbs = "double";
+    if (singleThumb) {
+      thumbs = "single";
+    }
+
     //if (dateRange.min !== null && dateRange.min !== undefined) {
-      let minDate = UIUtils.dateToTS(new Date(date + UIUtils.DAY_START));
-      let maxDate = UIUtils.dateToTS(new Date(date + UIUtils.DAY_END));
-      rangeSlider.update({
-        min: minDate,
-        max: maxDate,
-        from: minDate,
-        to: maxDate
-      });
+    let minDate = UIUtils.dateToTS(new Date(date + UIUtils.DAY_START));
+    let maxDate = UIUtils.dateToTS(new Date(date + UIUtils.DAY_END));
+    rangeSlider.update({
+      type: thumbs,
+      min: minDate,
+      max: maxDate,
+      from: minDate,
+      to: maxDate
+    });
     //}
   }
+
+  static updateLists(cacheSyms, selectID, selectedVal, excNodeID, instNodeID,
+    undNodeID, expNodeID, stkNodeID, cepeNodeID, daysNodeID, sliderNodeID, errAlertID, autocompNodeID = null, singleThumb=false) {
+    let excSel, instSel, ulySel, leaf = [null, null, null, null];
+    switch (selectID) {
+      case excNodeID:
+        let exc = selectedVal;
+        UIUtils.updSelectDropdown(instNodeID, cacheSyms.getBs(exc));
+        let inst = document.getElementById(instNodeID).options[0].text;
+        UIUtils.updSelectDropdown(undNodeID, Array.from(cacheSyms.getCs(exc, inst), val => val.c));
+        UIUtils.rmSpinner(instNodeID);
+        selectedVal = inst;  // For the next case, we are not break-ing
+      case instNodeID:
+        if (selectedVal === "OPTIONS") {
+          document.getElementById(expNodeID).disabled = false;
+          document.getElementById(stkNodeID).disabled = false;
+          document.getElementById(cepeNodeID).disabled = false;
+        } else if (selectedVal === "FUTURES") {
+          //document.getElementById(expNodeID).parentElement.parentElement.classList.remove("visually-hidden");
+          //document.getElementById(stkNodeID).parentElement.parentElement.classList.add("visually-hidden");
+          document.getElementById(expNodeID).disabled = false;
+          let nd = document.getElementById(stkNodeID);
+          nd.disabled = true; nd.options.length = 0;
+          nd = document.getElementById(cepeNodeID);
+          nd.disabled = true;
+        } else if (selectedVal === "INDEX") {
+          let nd = document.getElementById(expNodeID);
+          nd.disabled = true; nd.options.length = 0;
+          nd = document.getElementById(stkNodeID);
+          nd.disabled = true; nd.options.length = 0;
+          nd = document.getElementById(cepeNodeID);
+          nd.disabled = true;
+        }
+
+        excSel = document.getElementById(excNodeID);
+        UIUtils.updSelectDropdown(undNodeID, Array.from(cacheSyms.getCs(excSel.options[excSel.selectedIndex].text, selectedVal), val => val.c));
+        UIUtils.rmSpinner(undNodeID);
+        selectedVal = document.getElementById(undNodeID).options[0].text;
+      case undNodeID:
+        excSel = document.getElementById(excNodeID);
+        instSel = document.getElementById(instNodeID);
+        UIUtils.addSpinner(expNodeID);
+        leaf = cacheSyms.getLeaf(excSel.options[excSel.selectedIndex].text, instSel.options[instSel.selectedIndex].text, selectedVal);
+        DBFacade.fetchLists(leaf).then(data => {
+          //console.log(data);
+          if (data.days) {
+            UIUtils.updSelectDropdown(daysNodeID, data.days, true);
+            UIUtils.updateDatetimeSlider(sliderNodeID, daysNodeID, singleThumb);
+          }
+          if (data.exps) {
+            UIUtils.updSelectDropdown(expNodeID, data.exps, true);
+            UIUtils.updateLists(cacheSyms, expNodeID, data.exps[0], excNodeID, instNodeID,
+              undNodeID, expNodeID, stkNodeID, cepeNodeID, daysNodeID, sliderNodeID, errAlertID, autocompNodeID);
+          }
+          UIUtils.rmSpinner(expNodeID);
+        }).catch(error => {
+          console.log(error);
+          UIUtils.rmSpinner(expNodeID);
+          UIUtils.showAlert(errAlertID, error);
+        });
+
+        break;
+      case expNodeID:
+        excSel = document.getElementById(excNodeID);
+        instSel = document.getElementById(instNodeID);
+        ulySel = document.getElementById(undNodeID);
+
+        UIUtils.addSpinner(stkNodeID);
+        UIUtils.addSpinner(daysNodeID);
+        leaf = cacheSyms.getLeaf(excSel.value, instSel.value, ulySel.value);
+
+        DBFacade.fetchLists(leaf, selectedVal).then(data => {
+          //console.log(data);
+          if (data.days) {
+            UIUtils.updSelectDropdown(daysNodeID, data.days, true);
+          }
+          if (data.stks) {
+            UIUtils.updSelectDropdown(stkNodeID, data.stks, false, "all", "All Strikes");
+          }
+          UIUtils.updateLists(cacheSyms, daysNodeID, data.days[0], excNodeID, instNodeID,
+            undNodeID, expNodeID, stkNodeID, cepeNodeID, daysNodeID, sliderNodeID, errAlertID, autocompNodeID);
+          UIUtils.rmSpinner(stkNodeID);
+          UIUtils.rmSpinner(daysNodeID);
+          UIUtils.updateDatetimeSlider(sliderNodeID, daysNodeID, singleThumb);
+          UIUtils.updAutocomplete(cacheSyms, autocompNodeID);
+        }).catch(error => {
+          console.log(error);
+          UIUtils.rmSpinner(stkNodeID);
+          UIUtils.rmSpinner(daysNodeID);
+          UIUtils.showAlert(errAlertID, error);
+        });
+        break;
+      case daysNodeID:
+        UIUtils.updateDatetimeSlider(sliderNodeID, daysNodeID, singleThumb);
+    }
+
+  }
+
+  static async getRecords(excNodeID, instNodeID, undNodeID, 
+    expNodeID, stkNodeID, cepeNodeID, sliderNodeID, singleSlider=false) {
+
+    let rangeSlider = $("#" + sliderNodeID).data('ionRangeSlider');
+
+    let stkNode = document.getElementById(stkNodeID);
+    let stks = [];
+    
+    if (stkNode.value == "all") {
+      for (let i = 0; i < stkNode.options.length; i++) {
+        if (stkNode.options[i].value !== stkNode.value) {
+          stks.push(stkNode.options[i].value);
+        }
+      }
+    } else {
+      stks.push(stkNode.value);
+    }
+
+    let cepeNode = document.getElementById(cepeNodeID);
+    let cepe = [cepeNode.value];
+    if (cepeNode.value == "Both") {
+      cepe = ["CE", "PE"];
+    }
+
+    if (singleSlider) {
+      return DBFacade.fetchRecs(document.getElementById(excNodeID).value, document.getElementById(instNodeID).value,
+        document.getElementById(undNodeID).value, document.getElementById(expNodeID).value,
+        [Math.floor(rangeSlider.result.from / 60000) * 60], stks, cepe, null, null
+      );
+    } else {
+      return DBFacade.fetchRecs(document.getElementById(excNodeID).value, document.getElementById(instNodeID).value,
+        document.getElementById(undNodeID).value, document.getElementById(expNodeID).value,
+        null, stks, cepe, Math.floor(rangeSlider.result.from / 60000) * 60, Math.floor(rangeSlider.result.to / 60000) * 60
+      );
+    }
+  }
+
+
 
   static datetimeRange(nodeID) {
     // Returns { min: .., max: .. }
@@ -137,6 +321,703 @@ class UIUtils {
 UIUtils.DAY_START = "T09:15:00+05:30";
 UIUtils.DAY_END = "T15:30:00+05:30";
 
+class DataTable {
+  constructor() {
+    
+  }
+
+  createTableRow(cols, elem = "td") {
+    // Returns a tr Node object
+    let row = document.createElement("tr");
+    for (let i = 0; i < cols.length; i++) {
+      let cell = document.createElement(elem);
+      cell.innerHTML = cols[i];
+      row.appendChild(cell);
+    }
+
+    return row;
+  }
+
+  loadStrategy(nodeID, stg) {
+    const datatables = document.getElementById(nodeID);
+    while (datatables.hasChildNodes()) {
+      datatables.removeChild(datatables.firstChild);
+    }
+
+    const table = document.createElement("table");
+    table.className = "table caption-top table-sm table-bordered";
+    table.style = "{ empty-cells: show; }";
+
+    const caption = document.createElement("caption");
+    caption.className = "text-center";
+    caption.innerHTML = "<strong>" + stg.name + "</strong> created at <strong>" + new Date(stg.time).toString() + "</strong> Value :" + stg.value;
+    table.appendChild(caption);
+
+    const head = document.createElement("thead");
+    head.appendChild(this.createTableRow(["time", "Leg", "Exp", "Qty", "Open", "Price", "Value", "Cur Price", "Cur Value"], "th"));
+    table.appendChild(head);
+
+    const body = document.createElement("tbody");
+
+    let count = stg.count;
+    for (let i = 0; i < count; i++) {
+      let leg = stg.legs[i];
+      let rowData = [];
+
+      let name = leg.c;
+      if (leg.stk) {
+        name += " " + leg.stk;
+        name += " " + leg.cepe;
+      }
+
+      rowData.push(leg.timestamp);
+      rowData.push(name);
+      rowData.push(leg.exp);
+      rowData.push(leg.isBuy ? leg.lots : -leg.lots);
+      rowData.push(leg.isOpen ? "Open" : "Close");
+      rowData.push(leg.price);
+      rowData.push(leg.value);
+      rowData.push(leg.curPrice);
+      rowData.push(leg.curValue);
+
+      body.appendChild(this.createTableRow(rowData));
+    }
+
+    table.appendChild(body);
+    datatables.appendChild(table);
+  }
+
+  loadTable(nodeID, records) {
+    const datatables = document.getElementById(nodeID);
+    while (datatables.hasChildNodes()) {
+      datatables.removeChild(datatables.firstChild);
+    }
+
+    const nodata = "";
+    const tods = records.tods;
+
+    if (records.sym.isOption) {
+      const chainMap = records.objects;
+
+      for (let i = 0; i < tods.length; i++) {
+        const chain = chainMap.get(tods[i]);
+        const table = document.createElement("table");
+        table.className = "table caption-top table-sm table-bordered";
+        table.style = "{ empty-cells: show; }";
+
+        const caption = document.createElement("caption");
+        caption.className = "text-center";
+        caption.innerHTML = "<strong>" + chain.sym.c + "</strong> Chain Snapshot at <strong>" + new Date(parseInt(chain.tod) * 1000).toString() + "</strong>";
+        table.appendChild(caption);
+
+        const head = document.createElement("thead");
+        head.appendChild(this.createTableRow(["OI", "LTP", "Strike Price", "LTP", "OI"], "th"));
+        table.appendChild(head);
+
+        const body = document.createElement("tbody");
+
+        const sortedStrikes = chain.getStrikes();
+        for (let j = 0; j < sortedStrikes.length; j++) {
+          let pair = chain.getPair(sortedStrikes[j]);
+          let rowData = [];
+          if (pair.ce) {
+            if (pair.ce.fs) {
+              let t = pair.ce.fs[0].o;
+              rowData.push(t ? t : nodata);
+              t = pair.ce.fs[0].p;
+              rowData.push(t ? t : nodata);
+            } else {
+              rowData.push(nodata, nodata);
+            }
+          } else {
+            rowData.push(nodata, nodata);
+          }
+
+          rowData.push(sortedStrikes[j]);
+
+          if (pair.pe) {
+            if (pair.pe.fs) {
+              let t = pair.pe.fs[0].p;
+              rowData.push(t ? t : nodata);
+              t = pair.pe.fs[0].o;
+              rowData.push(t ? t : nodata);
+            } else {
+              rowData.push(nodata, nodata);
+            }
+          } else {
+            rowData.push(nodata, nodata);
+          }
+
+          body.appendChild(this.createTableRow(rowData));
+        }
+
+        table.appendChild(body);
+        datatables.appendChild(table);
+      }
+    } else {
+      const objects = records.objects;
+
+      const table = document.createElement("table");
+      table.className = "table caption-top table-sm table-bordered";
+      table.style = "{ empty-cells: show; }";
+
+      const caption = document.createElement("caption");
+      caption.className = "text-center";
+      caption.innerHTML = "<strong>" + records.sym.c + "</strong> Snapshots";
+      table.appendChild(caption);
+
+      const head = document.createElement("thead");
+      head.appendChild(this.createTableRow(["Date-Time", "Close", "Volume"], "th"));
+      table.appendChild(head);
+
+      const body = document.createElement("tbody");
+      for (let i = 0; i < tods.length; i++) {
+        const todrec = objects.get(tods[i]);     // One record per ts
+
+        if (todrec.C) {
+          body.appendChild(this.createTableRow([new Date(parseInt(todrec.tod) * 1000).toString(), todrec.C, todrec.V]));
+        }
+      }
+
+      table.appendChild(body);
+      datatables.appendChild(table);
+    }
+  }
+}
+
+class Strategy {
+  constructor(name) {
+    this._name = name;
+    this._tmstmp = Date.now();
+    this._legs = [];
+  }
+
+  get name() {
+    return this._name;
+  }
+
+  get time() {
+    return this._tmstmp;
+  }
+
+  add(leg, settle = false) {
+    // Returns true when settled or added successfully
+    for (let i = 0; i < this._legs.length; i++) {
+      if (leg.matches(this._legs[i])) {
+        if (settle) {
+          if (this._legs[i].settleWith(leg)) {
+            return true;
+          } else {
+            console.log("Settlement failed");
+            return false;
+          }
+        } else {
+          console.log("Match found, settlement not requested");
+          return false;
+        }
+      }
+    }
+
+    this._legs.push(leg);
+    return true;
+  }
+
+  get count() {
+    return this._legs.length;
+  }
+  get legs() {
+    return this._legs;
+  }
+
+  get value() {
+    let total = 0;
+    for (let i = 0; i < this._legs.length; i++) {
+      total += this._legs[i].value;
+    }
+
+    return total;
+  }
+
+  async updateEarnings(tmstmp, resolve, reject) {
+    const promises = [];
+    for (let i = 0; i < this._legs.length; i++) {
+      promises.push(this._legs[i].fetchNCalcEarnings(tmstmp));
+    }
+
+    Promise.allSettled(promises).then((results) => {
+      let curValue = 0;
+      let failure = false;
+      let reasons = [];
+      for (let i = 0; i < results.length; i++) {
+        if (results[i].status === "rejected") {
+          reasons.push(results[i].reason);
+          failure = true;
+        }
+      }
+
+      if (failure) {
+        reject(reasons);
+      } else {
+        for (let i = 0; i < results.length; i++) {
+          if (results[i].status === "fulfilled") {
+            curValue += results[i].value;
+          }
+        }
+
+        resolve(curValue);
+      }
+    });
+  }
+}
+
+LOT_SIZE = {
+  VK349: 25,
+  IMRO45: 75,
+  RP17: 40
+};
+
+class StrategyLeg {
+  constructor(sym, exp, bs, qty, prc, tmstmp=null, stk=null, cepe=null) {
+    this._a = sym.a;
+    this._b = sym.b;
+    this._c = sym.c;
+    this._e = exp;
+    this._s = stk;
+    this._cp = cepe;
+
+    this._buy = "BUY" === bs;  // If not BUY, it's a SELL
+    this._prc = prc;           // Price per share (needs to mul by lot size)
+    this.lots = qty;
+    
+    this._opt = sym.isOption;  // Only Futures & Options
+
+    this.timestamp = tmstmp;
+    
+    this._open = this.lots > 0 ? true : false;
+
+    this.curPrice = prc;
+
+    this._stllegs = [];      // Settlement Legs
+  }
+
+  get isOpen() {
+    return this._open;
+  }
+
+  get isClosed() {
+    return !this.isOpen;
+  }
+
+  get isBuy() {
+    return this._buy;
+  }
+
+  get lots() {
+    return this._q;
+  }
+
+  set lots(val) {
+    this._q = val;
+    this._tq = this._q * LOT_SIZE[this._c];
+    this._val = this._tq * this._prc;
+  }
+
+  get tqty() {
+    return this._tq;
+  }
+
+  get price() {
+    return this._prc;
+  }
+
+  set price(val) {
+    this._prc = val;
+    this._val = this.tqty * this._prc;
+  }
+
+  get curPrice() {
+    return this._curPrc;
+  }
+
+  set curPrice(val) {
+    this._curPrc = val;
+    this._curVal = this.tqty * this._curPrc;
+  }
+
+  get value() {
+    for (let i = 0; i < this._stllegs.length; i++) {
+
+    }
+    return this.isBuy ? (-this._val) : this._val;
+  }
+
+  get curValue() {
+    return this.isBuy ? (-this._curVal) : this._curVal;
+  }
+
+  get isOption() {
+    return this._opt;
+  }
+
+  get isFuture() {
+    return !this._opt;
+  }
+
+  get a() {
+    return this._a;
+  }
+
+  get b() {
+    return this._b;
+  }
+
+  get c() {
+    return this._c;
+  }
+
+  get exp() {
+    return this._e;
+  }
+
+  get stk() {
+    return this._s;
+  }
+
+  get cepe() {
+    return this._cp;
+  }
+
+  get timestamp() {
+    return this._tm.getTime();
+  }
+
+  set timestamp(val) {
+    if (!val) {
+      this._tm = new Date();
+    } else {
+      this._tm = new Date(val);
+    }
+  }
+
+  calcEarnings(newPrc) {    // New Price at which we do the opposite transaction
+    let newValue = this.isBuy ? (-this.tqty * newPrc) : this.tqty * newPrc;
+
+    return this.value - newValue;
+  }
+
+  matches(leg) {
+    // Returns true if this matches leg based on option/future attributes (not bs/qty/prc)
+    if (this.a === leg.a && this.b === leg.b && this.c === leg.c &&
+      this.exp === leg.exp && this.stk === leg.stk && this.cepe == leg.cepe) {
+      return true;
+    }
+
+    return false;
+  }
+
+  settleWith(leg) {
+    // Returns true if settlement done else false (no change made)
+    if (this.isClosed) {
+      return false;
+    }
+
+    if (this.matches(leg) && this.isBuy !== leg.isBuy) {
+      this._stllegs.push(leg);
+      if (this.lots === leg.lots) {
+        this._open = false;
+      }
+    } else {
+      return false;
+    }
+  }
+
+  async fetchNCalcEarnings(tmstmp = Date.now()) {
+    let resp = await this.getRecord(tmstmp);
+    let rec = new Record(resp[0]);
+    this.curPrice = rec.ltp;
+    return this.calcEarnings(rec.ltp);
+  }
+
+  async getRecord(tmstmp=Date.now(), endtm = null) {    // Javascript uses msec precision
+    // Round the timestamps to minute boundary.
+    if (endtm) {
+      return DBFacade.fetchRecs(this.a, this.b, this.c, this.exp,
+        null, [this.stk], [this.cepe], [Math.floor(tmstmp / 60000) * 60], [Math.floor(endtm / 60000) * 60]);
+    } else {
+      return DBFacade.fetchRecs(this._a, this._b, this.c, this.exp,
+        [Math.floor(tmstmp / 60000) * 60], [this.stk], [this.cepe], null, null);
+    }
+  }
+}
+
+class RecordList {
+  constructor(sym, recs) {
+    if (typeof (recs) === "string") {
+      recs = JSON.parse(recs);
+    }
+
+    this._sym = sym;
+    let records = [];
+    for (let i = 0; i < recs.length; i++) {
+      records.push(new Record(recs[i]));
+    }
+
+    this.process(records);
+  }
+
+  get sym() {
+    return this._sym;
+  }
+
+  get raw() {
+    return this._raw;
+  }
+
+  get objects() {
+    return this._todrecs;
+  }
+
+  get tods() {
+    return Array.from(this._todrecs.keys()).sort();
+  }
+
+  process(recs) {
+    this._raw = recs;
+    this._todrecs = new Map();    // ts -> rec
+    if (this.sym.isOption) {
+      for (let i = 0; i < recs.length; i++) {
+        let chain = this._todrecs.get(recs[i].tod);
+        if (chain) {
+          chain.add(recs[i]);
+        } else {
+          chain = new OptionChain(this.sym);
+          chain.tod = recs[i].tod;
+          chain.add(recs[i]);
+          this._todrecs.set(recs[i].tod, chain);
+        }
+      }
+    } else {
+      for (let i = 0; i < recs.length; i++) {
+        this._todrecs.set(recs[i].tod, recs[i]);
+      }
+    }
+  }
+}
+
+class OptionChain {
+  constructor(sym) {
+    this._sym = sym;
+    this._chain = new Map();  // Strike -> RecordPair
+  }
+
+  add(rec) {
+    let pair = this._chain.get(rec.stk);
+    if (pair) {
+      // set other side of the pair
+      pair.val = rec;
+    } else {
+      let pair = new RecordPair();
+      pair.val = rec;
+      this._chain.set(rec.stk, pair);
+    }
+  }
+
+  get sym() {
+    return this._sym;
+  }
+
+  get tod() {
+    return this._tod;
+  }
+
+  set tod(val) {
+    this._tod = val;
+  }
+
+  getStrikes() {
+    return Array.from(this._chain.keys()).sort((a, b) => a - b);
+  }
+
+  getPair(stk) {
+    return this._chain.get(stk);
+  }
+}
+
+class RecordPair {
+  constructor(ce=null, pe=null) {
+    this._ce = ce;
+    this._pe = pe;
+  }
+
+  set val(ce_pe) {
+    if (ce_pe.opt === "CE") {
+      this.ce = ce_pe;
+    } else if (ce_pe.opt === "PE") {
+      this.pe = ce_pe;
+    }
+  }
+
+  get ce() {
+    return this._ce;
+  }
+
+  set ce(val) {
+    if (val) {
+      this._ce = val;
+      this._stk = val.stk;
+    }
+  }
+
+  get pe() {
+    return this._pe;
+  }
+
+  set pe(val) {
+    if (val) {
+      this._pe = val;
+      this._stk = val.stk;
+    }
+  }
+
+  get stk() {
+    return this._stk;
+  }
+}
+
+class Record {
+  constructor(rec) {
+    if (typeof (rec) === "string") {
+      rec = JSON.parse(rec);
+    }
+    
+    this.rec = rec;
+    this.parse();
+  }
+
+  get tod() {
+    return this._tod;
+  }
+
+  get stk() {
+    return this._stk;
+  }
+
+  get opt() {
+    return this._opt;
+  }
+
+  get O() {
+    return this.rec.h[0];
+  }
+
+  get H() {
+    return this.rec.h[1];
+  }
+
+  get L() {
+    return this.rec.h[2];
+  }
+
+  get C() {
+    return this.rec.h[3];
+  }
+
+  get V() {
+    return this.rec.h[4];
+  }
+
+  get ltp() {
+    let prc = null;
+    let frms = this.fs;
+    if (frms) {
+      for (let i = 0; i < frms.length && frms[i].p; i++) {
+        prc = frms[i].p;
+      }
+    }
+    if (!prc && this.O) {
+      prc = (this.O + this.H + this.L + this.C) / 4;
+    }
+
+    return prc;
+  }
+
+  get fs() {
+    if (this._frms) {
+      return this._frms;
+    }
+
+    if (this.rec.f) {
+      let res = [];
+      for (let i = 0; i < this.rec.f.length; i++) {
+        res.push(new Frame(this.rec.f[i]));
+      }
+
+      return res;
+    }
+  }
+
+  parse() {
+    let idp = this.rec._id.split(":");
+    this._tod = idp[0];
+    if (idp.length > 1) {
+      this._stk = idp[1];
+      this._opt = idp[2];
+    }
+
+    this._frms = this.fs;
+  }
+}
+
+class Frame {
+  constructor(frm) {
+    this.frm = frm;
+  }
+
+  get tod() {
+    return this.frm.t;
+  }
+
+  get o() {
+    return this.frm.o;
+  }
+
+  get p() {
+    return this.frm.p;
+  }
+
+  get i() {
+    return this.frm.i;
+  }
+
+  get c() {
+    return this.frm.c;
+  }
+
+  get X() {
+    return this.frm.x;
+  }
+
+  get O() {
+    return this.frm.h[0];
+  }
+
+  get H() {
+    return this.frm.h[1];
+  }
+
+  get L() {
+    return this.frm.h[2];
+  }
+
+  get C() {
+    return this.frm.h[3];
+  }
+
+  get V() {
+    return this.frm.h[4];
+  }
+}
+
 class SymbolLeaf {
   constructor(a, b, c) {
     this.a = a;
@@ -159,8 +1040,30 @@ class SymbolLeaf {
 
   set expiries(val) {
     this._exps = val;
-    console.log(this.key);
-    console.log(val);
+  }
+
+  get isFuture() {
+    if (this._exps && this._stks.size == 0) {
+      return true;
+    }
+    return false;
+    //return (this.b === "FUTURES")
+  }
+
+  get isOption() {
+    if (this._exps && this._stks.size > 0) {
+      return true;
+    }
+    return false;
+    //return (this.b === "OPTIONS")
+  }
+
+  get isIndex() {
+    if (!this._exps && this._stks.size == 0) {
+      return true;
+    }
+    return false;
+    //return (this.b === "INDEX")
   }
 
   getStrikes(exp) {
@@ -194,12 +1097,11 @@ class SymbolLeaf {
     if (this.expiries) {
       for (let i = 0; i < this.expiries.length; i++) {
         let exp = this.expiries[i];
-        console.log(exp);
         exp = exp.substr(6, 2) + exp.substr(4, 2) + exp.substr(0, 4);
         if (this.getStrikes(this.expiries[i])) {
           let stks = this.getStrikes(this.expiries[i]);
           for (let j = 0; j < stks.length; j++) {
-            key = this.c + " " + exp + " " + stks[i];
+            let key = this.c + " " + exp + " " + stks[i];
             fullList.push(key + " CE");
             fullList.push(key + " PE");
           }
@@ -208,7 +1110,7 @@ class SymbolLeaf {
         }
       }
     }
-    
+
     return fullList;
   }
 }
@@ -262,8 +1164,8 @@ class SymbolList {
         }
       }
     }
-    
-    return new Set(fullList.sort()).keys();
+
+    return new Set(fullList.sort());
   }
 
   load(tree) {
@@ -623,7 +1525,7 @@ class DBFacade {
     if (sym.getStrikes(d) === null || sym.getStrikes(d) === undefined) {
       if (sym.b === "OPTIONS") {
         let response = await Fetcher.getStrikes(sym.a, sym.b, sym.c, d);
-        sym.setStrikes(d, response.data().sort());
+        sym.setStrikes(d, response.data().sort(function (a, b) { return a - b }));
       }
 
       if (sym.getDays(d) === null || sym.getDays(d) === undefined) {
