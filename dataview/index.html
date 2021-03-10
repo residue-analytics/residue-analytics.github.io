@@ -4,13 +4,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Data Viewer">
+  <title>Data Viewer</title>
 
   <!-- Bootstrap CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta1/dist/css/bootstrap.min.css" rel="stylesheet"
         integrity="sha384-giJF6kkoqNQ00vy+HMDP7azOuL0xtbfIcaT9wjKHr8RbDVddVHyTfAAsrekwKmP1" crossorigin="anonymous">
-
-  <meta name="description" content="Data Viewer">
-  <title>Data Viewer</title>
 
   <!--Plugin CSS file with desired skin-->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/ion-rangeslider/2.3.1/css/ion.rangeSlider.min.css" />
@@ -22,9 +21,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ion-rangeslider/2.3.1/js/ion.rangeSlider.min.js"></script>
 
   <script src="//cdn.jsdelivr.net/npm/pouchdb@7.2.1/dist/pouchdb.min.js"></script>
-
   <script src="/js/classes.js"></script>
   <script src="/js/dbaccess.js"></script>
+  <style>
+  </style>
 </head>
 
 <body>
@@ -111,7 +111,7 @@
           </div>
         </div>
 
-        <div class="col-md">
+        <div class="d-grid gap-2 d-md-block">
           <button type="button" id="fetch" class="btn btn-primary" onclick="getRecords()">FETCH</button>
         </div>
 
@@ -131,7 +131,7 @@
 
       <div class="row mb-3">
         <div class="col-4 ms-3 form-check form-switch">
-          <input class="form-check-input" type="checkbox" id="timesliderThumbs" onclick="switchThumbs()">
+          <input class="form-check-input" type="checkbox" id="timesliderThumbs" onclick="switchThumbs()" checked>
           <label class="form-check-label" for="timesliderThumbs">Time Range</label>
         </div>
         <div>
@@ -155,186 +155,223 @@
       <div id="chart"></div>
 
       <pre class="text-break" style="white-space:normal" id="output"></pre>
+
+      <button class="btn btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#collapseExample" aria-expanded="true" aria-controls="collapseExample">
+        Button with data-bs-target
+      </button>
+
+      <button class="btn btn-primary" type="button" onclick="toggleCollapse('collapseExample')">
+        Button with JS
+      </button>
+
+      <p />
+
+      <div class="collapse show" id="collapseExample">
+        <div class="card text-center mb-3">
+          <div class="card-header">
+            <ul class="nav nav-pills card-header-pills">
+              <li class="nav-item">
+                <a class="nav-link active" href="#">Active</a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="#">Link</a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link disabled" href="#" tabindex="-1" aria-disabled="true">Disabled</a>
+              </li>
+            </ul>
+          </div>
+          <div class="card-body">
+            <h5 class="card-title">Special title treatment</h5>
+            <p class="card-text">With supporting text below as a natural lead-in to additional content.</p>
+            <a href="#" class="btn btn-primary">Go somewhere</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="row row-cols-1 row-cols-md-3 mb-3 text-center">
+        <div class="col">
+          <div class="card mb-3 shadow-sm">
+            <div class="card-header">
+              Featured
+            </div>
+            <div class="card-body">
+              <h5 class="card-title">Special title treatment</h5>
+              <p class="card-text">With supporting text below as a natural lead-in to additional content.</p>
+              <a href="#" class="btn btn-primary" type="button" onclick="toggleCollapse('collapseExample')">Toggle Detailed View</a>
+            </div>
+            <div class="card-footer text-muted">
+              2 days ago
+            </div>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="card mb-3 shadow-sm">
+            <div class="card-header">
+              Featured
+            </div>
+            <div class="card-body">
+              <h5 class="card-title">Special title treatment</h5>
+              <p class="card-text">With supporting text below as a natural lead-in to additional content.</p>
+              <a href="#" class="btn btn-primary" type="button" onclick="toggleCollapse('collapseExample')">Toggle Detailed View</a>
+            </div>
+            <div class="card-footer text-muted">
+              2 days ago
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div id="datatables">
-        
       </div>
     </div>
   </div>
 
-    <script type="text/javascript">
+  <script type="text/javascript">
 
-      var worker = new Worker('js/dataworker.js');
-      var cacheSyms = null;
-      var strategy = new Strategy("tester");
+    var cacheSyms = null;
+    var strategy = new Strategy("tester");
 
-      var thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
+    var thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
 
-      $("#timeslider").ionRangeSlider({
-        skin: "round",
-        type: thumbs,
-        grid: true,
-        min: UIUtils.dateToTS(new Date("2021-01-01T09:15:00+05:30")),
-        max: UIUtils.dateToTS(new Date("2021-01-01T15:30:00+05:30")),
-        from: UIUtils.dateToTS(new Date("2021-01-01T12:00:00+05:30")),
-        to: UIUtils.dateToTS(new Date("2021-01-01T13:00:00+05:30")),
-        force_edges: true,
-        prettify: UIUtils.tsToDate
+    $("#timeslider").ionRangeSlider({
+      skin: "round",
+      type: thumbs,
+      grid: true,
+      min: UIUtils.dateToTS(new Date("2021-01-01T09:15:00+05:30")),
+      max: UIUtils.dateToTS(new Date("2021-01-01T15:30:00+05:30")),
+      from: UIUtils.dateToTS(new Date("2021-01-01T12:00:00+05:30")),
+      to: UIUtils.dateToTS(new Date("2021-01-01T13:00:00+05:30")),
+      force_edges: true,
+      prettify: UIUtils.tsToDate
+    });
+
+    // Initialize the dropdowns
+    UIUtils.addSpinner("exchange");
+    UIUtils.addSpinner("instrument");
+    UIUtils.addSpinner("underlying");
+    DBFacade.fetchLists().then(symList => {
+      cacheSyms = symList;
+      UIUtils.updSelectDropdown("exchange", symList.getAs());
+      UIUtils.rmSpinner("exchange");
+      let exc = document.getElementById("exchange").options[0].text;
+      pageUpdateLists("exchange", exc);
+      UIUtils.updAutocomplete(cacheSyms, "autocompleteOptions");
+    });
+
+    function toggleCollapse(cardNodeID) {
+      var cardEl = document.getElementById(cardNodeID);
+      var collapse = new bootstrap.Collapse(cardEl, {
+        toggle: true
       });
+    }
 
-      // Initialize the dropdowns
-      UIUtils.addSpinner("exchange");
-      UIUtils.addSpinner("instrument");
-      UIUtils.addSpinner("underlying");
-      DBFacade.fetchLists().then(symList => {
-        cacheSyms = symList;
-        UIUtils.updSelectDropdown("exchange", symList.getAs());
-        UIUtils.rmSpinner("exchange");
-        let exc = document.getElementById("exchange").options[0].text;
-        pageUpdateLists("exchange", exc);
-        UIUtils.updAutocomplete(cacheSyms, "autocompleteOptions");
-      });
+    function switchThumbs() {
 
-      function switchThumbs() {
+      let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
 
-        let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
+      UIUtils.updateDatetimeSlider("timeslider", "days", thumbs === "single");
+    }
 
-        UIUtils.updateDatetimeSlider("timeslider", "days", thumbs === "single");
+    function evaluateScript() {
+      console.log("Evaluating");
+      let input = document.getElementById('scriptevaluator').value;
+      let output = document.getElementById('output');
+      data = eval(input);
+      if (data instanceof Promise) {
+        data.then(response => {
+          output.innerHTML = JSON.stringify(response)
+        }).catch(error => {
+          UIUtils.showAlert("erroralert", error);
+          output.innerHTML = JSON.stringify(error);
+          console.log(error);
+        });
+      } else {
+        output.innerHTML = data;
       }
+    }
 
-      function evaluateScript() {
-        console.log("Evaluating");
-        let input = document.getElementById('scriptevaluator').value;
-        let output = document.getElementById('output');
-        data = eval(input);
-        if (data instanceof Promise) {
-          data.then(response => {
-            output.innerHTML = JSON.stringify(response)
-          }).catch(error => {
-            UIUtils.showAlert("erroralert", error);
-            output.innerHTML = JSON.stringify(error);
-            console.log(error);
-          });
-        } else {
-          output.innerHTML = data;
-        }
-      }
+    function pageUpdateLists(selectID, selectedVal) {
+      let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
 
-      function pageUpdateLists(selectID, selectedVal) {
-        let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
+      UIUtils.updateLists(cacheSyms, selectID, selectedVal, "exchange", "instrument", "underlying",
+        "expiries", "strikes", "ce_pe", "days", "timeslider", "erroralert", "autocompleteOptions",
+        thumbs === "single");
+    }
 
-        UIUtils.updateLists(cacheSyms, selectID, selectedVal, "exchange", "instrument", "underlying",
-          "expiries", "strikes", "ce_pe", "days", "timeslider", "erroralert", "autocompleteOptions",
-          thumbs === "single");
-      }
+    function addStrategy(id, action) {
+      UIUtils.addSpinner(id);
+      let output = document.getElementById("output");
+      let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
 
-      function addStrategy(id, action) {
-        UIUtils.addSpinner(id);
-        let output = document.getElementById("output");
-        let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
+      UIUtils.getRecords("exchange", "instrument", "underlying",
+        "expiries", "strikes", "ce_pe", "timeslider", thumbs === "single").then(response => {
+          //output.innerHTML = JSON.stringify(response);
+          let sym = cacheSyms.getLeaf(document.getElementById("exchange").value,
+            document.getElementById("instrument").value,
+            document.getElementById("underlying").value);
 
-        UIUtils.getRecords("exchange", "instrument", "underlying",
-          "expiries", "strikes", "ce_pe", "timeslider", thumbs === "single").then(response => {
-            //output.innerHTML = JSON.stringify(response);
-            let sym = cacheSyms.getLeaf(document.getElementById("exchange").value,
-              document.getElementById("instrument").value,
-              document.getElementById("underlying").value);
+          let records = new RecordList(sym, response).raw;
+          output.innerHTML = JSON.stringify(records[0]);
 
-            let records = new RecordList(sym, response).raw;
-            output.innerHTML = JSON.stringify(records[0]);
+          let leg = new StrategyLeg(sym, document.getElementById("expiries").value,
+            action, document.getElementById("quantity").value, records[0].ltp, null,
+            document.getElementById("strikes").value, document.getElementById("ce_pe").value);
 
-            let leg = new StrategyLeg(sym, document.getElementById("expiries").value,
-              action, document.getElementById("quantity").value, records[0].ltp, null,
-              document.getElementById("strikes").value, document.getElementById("ce_pe").value);
+          console.log(JSON.stringify(leg));
+          console.log("leg value: " + leg.value);
+          console.log(strategy.add(leg));
+          console.log(strategy.value);
 
-            console.log(JSON.stringify(leg));
-            console.log("leg value: " + leg.value);
-            console.log(strategy.add(leg));
-            console.log(strategy.value);
+          new DataTable().loadStrategy("datatables", strategy);
 
-            new DataTable().loadStrategy("datatables", strategy);
+          UIUtils.rmSpinner(id);
+        }).catch(error => {
 
-            UIUtils.rmSpinner(id);
-          }).catch(error => {
-            
-            output.innerHTML = JSON.stringify(error);
-            console.log(error);
-            UIUtils.rmSpinner(id);
-            UIUtils.showAlert("erroralert", error);
-          });
-      }
+          output.innerHTML = JSON.stringify(error);
+          console.log(error);
+          UIUtils.rmSpinner(id);
+          UIUtils.showAlert("erroralert", error);
+        });
+    }
 
-      function checkStrategy(id) {
-        UIUtils.addSpinner(id);
-        let output = document.getElementById("output");
-        let rangeSlider = $("#timeslider").data('ionRangeSlider');
+    function checkStrategy(id) {
+      UIUtils.addSpinner(id);
+      let output = document.getElementById("output");
+      let rangeSlider = $("#timeslider").data('ionRangeSlider');
 
-        strategy.updateEarnings(rangeSlider.result.from,
-          function (value) { console.log(value); UIUtils.rmSpinner(id); },
-          function (reasons) { console.log(reasons); output.innerHTML = JSON.stringify(reasons); UIUtils.rmSpinner(id); }
-        );
-      }
+      strategy.updateEarnings(rangeSlider.result.from,
+        function (value) { console.log(value); UIUtils.rmSpinner(id); },
+        function (reasons) { console.log(reasons); output.innerHTML = JSON.stringify(reasons); UIUtils.rmSpinner(id); }
+      );
+    }
 
-      function getRecords() {
-        UIUtils.addSpinner("fetch");
-        let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
-        UIUtils.getRecords("exchange", "instrument", "underlying",
-          "expiries", "strikes", "ce_pe", "timeslider", thumbs === "single").then(response => {
-            //output.innerHTML = JSON.stringify(response);
-            let leaf = cacheSyms.getLeaf(document.getElementById("exchange").value,
-              document.getElementById("instrument").value,
-              document.getElementById("underlying").value);
+    function getRecords() {
+      UIUtils.addSpinner("fetch");
+      let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
+      UIUtils.getRecords("exchange", "instrument", "underlying",
+        "expiries", "strikes", "ce_pe", "timeslider", thumbs === "single").then(response => {
+          //output.innerHTML = JSON.stringify(response);
+          let leaf = cacheSyms.getLeaf(document.getElementById("exchange").value,
+            document.getElementById("instrument").value,
+            document.getElementById("underlying").value);
 
-            new DataTable().loadTable("datatables", new RecordList(leaf, response));
+          new DataTable().loadTable("datatables", response);
 
-            UIUtils.rmSpinner("fetch");
-          }).catch(error => {
-            let output = document.getElementById("output");
-            output.innerHTML = JSON.stringify(error);
-            console.log(error);
-            UIUtils.rmSpinner("fetch");
-            UIUtils.showAlert("erroralert", error);
-          });
-      }
+          UIUtils.rmSpinner("fetch");
+        }).catch(error => {
+          let output = document.getElementById("output");
+          output.innerHTML = JSON.stringify(error);
+          console.log(error);
+          UIUtils.rmSpinner("fetch");
+          UIUtils.showAlert("erroralert", error);
+        });
+    }
 
-      worker.onmessage = function (event) {
-        if (event.data.status != 200) {
-          alertMessage(event.data.message + "[" + event.data.status + "]");
-          return;
-        }
-      }
-
-      worker.onerror = function (err) {
-        console.log(err);
-        alertMessage(err);
-      };
-
-      function processResponse() {
-        if (xhr.readyState == 4) {
-          if (xhr.status == 200) {
-            jsonObj = JSON.parse(xhr.responseText);
-          } else {
-            if (xhr.status == 0) {
-              alertMessage(xhr.status, "Non-HTTP Error: " + xhr.statusText)
-            } else {
-              alertMessage(xhr.status, xhr.statusText);
-            }
-          }
-        }
-      }
-
-      function clearData() {
-        let underlying = document.getElementById('underlying').value;
-        let select = document.getElementById('expiry');
-        let expirySel
-        if (select.selectedIndex != -1) {
-          expirySel = select.options[select.selectedIndex].text;
-        }
-        saveOITrendDataStore(underlying, expirySel, []);
-        getChain();
-      }
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js" integrity="sha384-q2kxQ16AaE6UbzuKqyBE9/u/KzioAlnx2maXQHiDX9d4/zp8Ok3f+M7DPm+Ib6IU" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta1/dist/js/bootstrap.min.js" integrity="sha384-pQQkAEnwaBkjpqZ8RU1fF1AKtTcHJwFl3pblpTlHXybJjHpMYo79HY3hIi4NKxyj" crossorigin="anonymous"></script>
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js" integrity="sha384-q2kxQ16AaE6UbzuKqyBE9/u/KzioAlnx2maXQHiDX9d4/zp8Ok3f+M7DPm+Ib6IU" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta1/dist/js/bootstrap.min.js" integrity="sha384-pQQkAEnwaBkjpqZ8RU1fF1AKtTcHJwFl3pblpTlHXybJjHpMYo79HY3hIi4NKxyj" crossorigin="anonymous"></script>
 
 </body>
 

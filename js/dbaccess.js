@@ -87,17 +87,21 @@ class UIUtils {
     let parent = null;
     if (child.type === "button") {
       child.disabled = true;
+      //child.setAttribute("data-name", child.innerText);
+      //child.innerText = "Loading...";
       parent = child;
+
+      const spinner = document.createElement('span');
+      spinner.className = 'spinner-border spinner-border';
+      spinner.role = 'status';
+      spinner.innerHTML = `<span class="visually-hidden" > Loading...</span >`;
+      //parent.insertBefore(spinner, child);
+      parent.appendChild(spinner);
     } else {
+      UIUtils.updSelectDropdown(nodeID, [], false, "0", "Loading...");
+      child.disabled = true;
       parent = child.parentElement;
     }
-
-    const spinner = document.createElement('span');
-    spinner.className = 'spinner-border spinner-border-sm ms-2';
-    spinner.role = 'status';
-    spinner.innerHTML = `<span class="visually-hidden" > Loading...</span >`;
-    //parent.insertBefore(spinner, child);
-    parent.appendChild(spinner);
   }
 
   static rmSpinner(nodeID) {
@@ -105,14 +109,16 @@ class UIUtils {
     let parent = null;
     if (child.type === "button") {
       child.disabled = false;
+      child.innerText = child.getAttribute("data-name");
       parent = child;
-    } else {
-      parent = child.parentElement;
-    }
 
-    const spinner = parent.querySelector('.spinner-border');
-    if (spinner) {
-      parent.removeChild(spinner);
+      const spinner = parent.querySelector('.spinner-border');
+      if (spinner) {
+        parent.removeChild(spinner);
+      }
+    } else {
+      child.disabled = false;
+      parent = child.parentElement;
     }
   }
 
@@ -758,8 +764,15 @@ class RecordList {
 
     this._sym = sym;
     let records = [];
+    //console.log(JSON.stringify(recs));
     for (let i = 0; i < recs.length; i++) {
-      records.push(new Record(recs[i]));
+      if (recs.list[i] instanceof DBResult) {
+        if (recs.list[i].ok) {
+          records.push(recs.list[i].record);
+        }
+      } else {
+        records.push(new Record(recs[i]));
+      }
     }
 
     this.process(records);
@@ -892,6 +905,10 @@ class Record {
     
     this.rec = rec;
     this.parse();
+  }
+
+  get id() {
+    return this.rec._id;
   }
 
   get tod() {
@@ -1189,6 +1206,480 @@ class SymbolList {
   }
 }
 
+class DateRange {
+  constructor(start, end = null) {
+    if (!start) {
+      throw Error("Undefined start date in DateRange");
+    }
+
+    //console.log("Input S [" + start + "] E [" + end + "]");
+
+    if (start instanceof Date) {
+      this._start = start;
+    } else {
+      let num = typeof (start) === 'string' ? parseInt(start) : start;
+
+      if (isNaN(num)) {    // In case start is in ISO format etc.
+        this._start = new Date(start);
+      } else {
+        let len = typeof (start) === 'string' ? start.length : Math.log(start) * Math.LOG10E + 1 | 0;
+        if (len <= 10) {   // time in seconds
+          num = num * 1000;
+        }
+        
+        this._start = new Date(num);
+      }
+    }
+
+    if (end) {
+      if (end instanceof Date) {
+        this._end = end;
+      } else {
+        let num = typeof (end) === 'string' ? parseInt(end) : end;
+
+        if (isNaN(num)) {    // In case end is in ISO format etc.
+          this._end = new Date(end);
+        } else {
+          let len = typeof (end) === 'string' ? end.length : Math.log(end) * Math.LOG10E + 1 | 0;
+          if (len <= 10) {   // time in seconds
+            num = num * 1000;
+          }
+
+          this._end = new Date(num);
+        } 
+      }
+
+      if (this._start.getTime() > this._end.getTime()) {
+        let temp = this._start;
+        this._start = this._end;
+        this._end = this._start;
+      }
+    }
+
+    //console.log("Range [" + JSON.stringify(this) + "]");
+  }
+
+  get isRange() {
+    return this._end ? true : false;
+  }
+
+  isWithin(dttm) {
+    // dttm - Date, DateRange or Number
+    // DateRange -> "other" range within "this" range
+    // Date/Number -> "other" within "this" range
+
+    if (!this.isRange) {
+      if (typeof(dttm) === 'number' || typeof(dttm) === 'string') {
+        return this.startMSec === new DateRange(dttm).startMSec;
+      } else if (dttm instanceof DateRange) {
+        if (dttm.isRange) {
+          throw new Error("Cannot check within(range) on non-range");
+        }
+        return this.startMSec === dttm.startMSec;
+      } else {
+        // Date
+        return this.startMSec === dttm.getTime();
+      }
+    }
+
+    if (typeof (dttm) === 'number' || typeof (dttm) === 'string') {
+      let temp = new DateRange(dttm);
+      return this.startMSec <= temp.startMSec && this.endMSec >= temp.startMSec;
+    } else if (dttm instanceof DateRange) {
+      if (dttm.isRange) {
+        return this.isWithin(dttm.startMSec) && this.isWithin(dttm.endMSec);
+      } else {
+        return this.isWithin(dttm.startMSec);
+      }
+    } else {
+      // Date
+      return this.startMSec <= dttm.getTime() && this.endMSec >= dttm.getTime();
+    }
+  }
+
+  areOverlapping(other) {
+    return this.isWithin(other.startMSec) || this.isWithin(other.endMSec);
+  }
+
+  static make(other) {
+    // Make a DateRange encapsulating all the DateTime values present in the array
+    if (Array.isArray(other)) {
+      other = other.filter(val => val);   // Remove null, undefined
+      let first = other.shift();
+      if (!(first instanceof DateRange)) {
+        first = new DateRange(first);
+      }
+
+      return first.merge(other);
+    } else {
+      throw new Error("Cannot DateRange make/merge a non-array");
+    }
+  }
+
+  merge(other) {
+    // Merge both and return a new Range. Merges ranges and non-ranges both
+    if (!other) {
+      return this;
+    }
+
+    if (Array.isArray(other)) {
+      // All "other" elements must be DateRange or compatible with the constructor
+      other = other.filter(val => val);   // Remove null, undefined
+      return other.reduce(function (accumulator, current) { return accumulator.merge(current); }, this);
+    } else if (!(other instanceof DateRange)) {
+      other = new DateRange(other);
+    }
+
+    let new_start = this.startMSec <= other.startMSec ? this.startDate : other.startDate;
+    let new_end = null;
+    if (this.isRange) {
+      if (other.isRange) {
+        new_end = this.endMSec >= other.endMSec ? this.endDate : other.endDate;
+      } else {
+        new_end = this.endMSec >= other.startMSec ? this.endDate : other.startDate;
+      }
+    } else {
+      if (other.isRange) {
+        new_end = this.startMSec >= other.endMSec ? this.startDate : other.endDate;
+      } else {
+        new_end = this.startMSec >= other.startMSec ? this.endDate : other.startDate;
+      }
+    }
+
+    return new DateRange(new_start, new_end);
+  }
+
+  split(durationMins, alignStart = true) {
+    // Split this range in ranges of given number of minutes (durationMins), 
+    //   optionally aligning the start of first range at the nearest durationMins
+    let newRanges = [];
+    let newStart = this.startMSec;
+    let endMSec = null;
+    let durMSec = durationMins * 60000;
+
+    if (this.isRange) {
+      endMSec = this.endMSec;
+    } else {
+      // Convert a non-range into a range of durationMins
+      endMSec = newStart;
+    }
+    
+    if (alignStart) {
+      let rem = newStart % durMSec;
+      newStart -= rem;
+    }
+    
+    for (; newStart <= endMSec; newStart += durMSec) {
+      // new range end is 1 msec behind to ensure no over-lapping with the next range
+      newRanges.push(new DateRange(newStart, newStart + durMSec - 1));
+    }
+
+    return newRanges;
+  }
+
+  getCountIntervals(durationMins) {
+    // Count of the given duration intervals within this range
+    if (this.isRange) {
+      let durMSec = durationMins * 60000;
+      let totDurMSec = this.endMSec - this.startMSec;
+      return Math.ceil(totDurMSec / durMSec);
+    } else {
+      return 1;
+    }
+  }
+
+  get startDate() {
+    return this._start;
+  }
+
+  get startMSec() {
+    return this.startDate.getTime();
+  }
+
+  get startSec() {
+    return Math.floor(this.startMSec / 1000);
+  }
+
+  get startLMinBSec() {  // Lower Minute Boundary in Seconds
+    return Math.floor(this.startSec / 60) * 60;
+  }
+
+  get endDate() {
+    return this._end;
+  }
+
+  get endMSec() {
+    return this.endDate.getTime();
+  }
+
+  get endSec() {
+    return Math.floor(this.endMSec / 1000);
+  }
+
+  get endLMinBSec() {  // Lower Minute Boundary in Seconds
+    return Math.floor(this.endSec / 60) * 60;
+  }
+}
+
+class DBRequestList {
+  constructor(request = null) {
+    this._list = [];
+    this.push(request);
+  }
+
+  get list() {
+    return this._list;
+  }
+
+  get length() {
+    return this._list.length;
+  }
+
+  push(request) {
+    if (!request) {
+      return;
+    }
+
+    this._list.push(request);
+  }
+
+  load(other) {
+    if (other instanceof DBRequest) {
+      this.push(other);
+    } else if (Array.isArray(other)) {
+      other.forEach(req => this.push(req), this);
+    } else if (other instanceof DBRequestList) {
+      other.list.forEach(req => this.push(req), this);
+    }
+  }
+}
+
+class DBRequest {
+  constructor(sym) {
+    this._sym = sym;
+  }
+
+  get a() {
+    return this._sym.a;
+  }
+
+  get b() {
+    return this._sym.b;
+  }
+
+  get c() {
+    return this._sym.c;
+  }
+
+  get forOption() {
+    return this._sym.isOption;
+  }
+
+  get forFuture() {
+    return this._sym.isFuture;
+  }
+
+  get forIndex() {
+    return this._sym.isIndex;
+  }
+
+  get sym() {
+    return this._sym;
+  }
+
+  get exp() {
+    return this._exp;
+  }
+
+  set exp(val) {
+    if (val.indexOf('-') != -1) {
+      // Date in display format - DD-MM-YYYY
+      let comps = val.split('-');
+      this._exp = comps[2] + comps[1] + comps[0];
+    } else {
+      this._exp = val;
+    }
+  }
+
+  get stks() {
+    return this._stks;
+  }
+
+  set stks(val) {
+    if (Array.isArray(val)) {
+      this._stks = val;
+    } else {
+      this._stks = [val];
+    }
+  }
+
+  get cepe() {
+    return this._cepe;
+  }
+
+  set cepe(val) {
+    if (Array.isArray(val)) {
+      this._cepe = val;
+    } else {
+      this._cepe = [val];
+    }
+  }
+
+  get reqDts() {
+    return this._dts;
+  }
+
+  set reqDts(val) {
+    if (Array.isArray(val)) {
+      this._dts = val.map(function (value) { return new DateRange(value); } );
+    } else {
+      this._dts = [ new DateRange(val) ];
+    }
+  }
+
+  get range() {
+    return this._dtRange;
+  }
+
+  set range(val) {
+    this._dtRange = val;
+  }
+
+  setRange(start, end) {
+    this._dtRange = new DateRange(start, end);
+  }
+
+  get force() {
+    return this._force;
+  }
+
+  set force(val) {
+    this._force = val ? true : false;
+  }
+
+  get expectedCount() {
+    if (this.reqDts) {
+      return this.reqDts.length * (this.stks ? this.stks.length : 1) * (this.cepe ? this.cepe.length : 1);
+    } else {
+      return this.range.getCountIntervals(1) * (this.stks ? this.stks.length : 1) * (this.cepe ? this.cepe.length : 1);
+    }
+  }
+
+  _copy() {
+    let copy = new DBRequest(this.sym);
+    Object.assign(copy, this);
+    //copy.exp = this.exp;
+    //copy.stks = this.stks;
+    //copy.cepe = this.cepe;
+    //copy._dts = this.reqDts;
+    //copy.range = this.range;
+    //copy.force = this.force;
+    return copy;
+  }
+
+  spreadIntervals(intervalMins = 0) {
+    // Returns DBRequestList
+
+    let reqs = new DBRequestList();
+    
+    if (intervalMins > 0) {
+      let dtRanges = null;
+      if (this.reqDts) {
+        dtRanges = DateRange.make(this.reqDts).split(intervalMins);
+      } else if (this.range) {
+        dtRanges = this.range.split(intervalMins);
+      } else {
+        throw new Error("Incomplete Request: No Dates to spread over")
+      }
+
+      for (let i = 0; i < dtRanges.length; i++) {
+        let newreq = this._copy();
+        newreq._dts = null;
+        newreq.range = dtRanges[i];
+        reqs.push(newreq);
+      }
+      return reqs;
+    } else {
+      // Separate out the multiple dates and leave the ranges as it is
+      if (this.reqDts) {
+        if (this.reqDts.length > 1) {
+          for (let i = 0; i < this.reqDts.length; i++) {
+            let newreq = this._copy();
+            newreq._dts = this.reqDts[i];
+            reqs.push(newreq);
+          }
+          return reqs;
+        } else {
+          reqs.push(this);
+          return reqs;
+        }
+      } else {
+        reqs.push(this);
+        return reqs;
+      }
+    }
+  }
+
+  spreadStrikes() {
+    if (!this.forOption) {
+      return this;
+    }
+
+    let reqs = new DBRequestList();
+    
+    for (let j = 0; j < this.cepe.length; j++) {
+      for (let k = 0; k < this.stks.length; k++) {
+        let newreq = this._copy();
+        newreq.cepe = [this.cepe[j]];
+        newreq.stks = [this.stks[k]];
+        reqs.push(newreq);
+      }
+    }
+
+    return reqs;
+  }
+
+  spread(intervalMins = 0) {
+    let intReqs = this.spreadIntervals(intervalMins);
+
+    let reqs = new DBRequestList();
+    for (let i = 0; i < intReqs.length; i++) {
+      let stkReqs = intReqs.list[i].spreadStrikes();
+      reqs.load(stkReqs);
+    }
+
+    return reqs;
+  }
+
+  match(record) {
+    if (!(record instanceof Record)) {
+      record = new Record(record);
+    }
+
+    let matched = false;
+
+    if (this.stks) {
+      matched = this.stks.find(val => val === record.stk) ? true : false;
+      if (!matched) { return matched; }
+    }
+
+    if (this.cepe) {
+      matched = this.cepe.find(val => val === record.opt) ? true : false;
+      if (!matched) { return matched; }
+    }
+
+    if (this.reqDts) {
+      matched = this.reqDts.find(val => val.isWithin(record.tod)) ? true : false
+      if (!matched) { return matched; }
+    } else {
+      matched = this.range.isWithin(record.tod);
+      if (!matched) { return matched; }
+    }
+
+    return matched;
+  }
+}
+
 class DBOps {
 
   constructor(name) {
@@ -1197,15 +1688,33 @@ class DBOps {
   }
 
   async destroy() {
+    // Returns boolean
     let resp = await this.db.destroy().catch(function (err) { throw new DBError("Unable to destroy [" + this.name + "]", err) });
     return resp.ok
   }
 
+  async putBulk(docs, pre = false) {
+    // Returns List of DBResult
+    let resps = new DBResultList();
+    for (let i = 0; i < docs.length; i++) {
+      try {
+        resps.push(await this.put(docs[i], true));
+      } catch (err) {
+        let result = new DBResult();
+        result.error = new DBError("Error while put bulk", err);
+        resps.push(result);
+      }
+    }
+
+    return resps;
+  }
+
   async put(doc, pre = false) {
-    // pre, ensures putting the doc with new revision when doc alread exists in DB
+    // returns DBResult
+    // pre - ensures putting the doc with new revision when doc alread exists in DB
 
     if (doc === null || doc === undefined) {
-      throw new DBError("Trying to save null");
+      return new DBResult().error = new DBError("Trying to save null");
     }
 
     if (typeof (doc) === "string") {
@@ -1215,7 +1724,10 @@ class DBOps {
     if (pre) {
       // Pre-check whether record already exists
       if (doc._id) {
-        const dbrec = await this.db.get(doc._id);
+        const dbrec = null;
+        try {
+          dbrec = await this.db.get(doc._id);
+        } catch (err) {}  // Ignore error, document need not exist in the db
         if (dbrec) {
           console.log("document [" + doc._id + "] exists in DB [" + this.name + "], updating _rev [" + dbrec._rev + "]");
           doc["_rev"] = dbrec._rev;
@@ -1225,25 +1737,41 @@ class DBOps {
       }
     }
 
-    let success = await this.db.put(doc).catch(function (err) {
+    let success = new DBResult();
+    success.id = doc._id;
+    try {
+      success.status = await this.db.put(doc);
+    } catch (err) {
       //console.log(err);
-      throw new DBError("Unable to put [" + doc._id + "] status [" + err.status + "]", err);
-    });
+      success.error = new DBError("Unable to put [" + doc._id + "] status [" + err.status + "]", err);
+    };
 
     //console.log(success);
-    return success.ok;
+    return success;
   }
 
   async get(docId) {
-    return await this.db.get(docId).catch(function (err) { throw new DBError("DB get [" + docId + "]", err) });
+    let success = new DBResult();
+    success.id = docId;
+    try {
+      let doc = await this.db.get(docId);
+      success.rev = doc._rev;
+      success.record = doc;
+    } catch (err) {
+      success.error = new DBError("DB get [" + docId + "]", err);
+    }
+
+    return success;
   }
 
   async delete(doc) {
     // We follow the recommended practice of adding _deleted : true to the doc
     //   in place of using db.remove(doc._id, doc._rev)
+    let result = new DBResult();
 
     if (doc === null || doc === undefined) {
-      throw new DBError("Trying to save null");
+      result.error = new DBError("Trying to save null");
+      return result;
     }
 
     if (typeof (doc) === "string") {
@@ -1251,22 +1779,186 @@ class DBOps {
     }
 
     if (!doc._id) {
-      throw new DBError("Can't delete doc without _id");
+      result.error = new DBError("Can't delete doc without _id");
+      return result;
     }
 
     if (doc._deleted === undefined || doc._deleted === null) {
       doc._deleted = true;
     }
 
-    return await this.put(doc, true);
+    result.id = doc._id;
+    try {
+      result.status = await this.put(doc, true);
+    } catch (err) {
+      result.error = err;
+    }
+
+    return result;
+  }
+}
+
+class DBResultList {
+  constructor(result = null) {
+    this._list = [];
+    this._hasok = false;
+    this.push(result);
+  }
+
+  get list() {
+    return this._list;
+  }
+
+  get length() {
+    return this._list.length;
+  }
+
+  get hasOK() {
+    return this._hasok;
+  }
+
+  push(result) {
+    if (!result) {
+      return;
+    }
+
+    if (result.ok) {
+      this._hasok = true;
+    }
+    this._list.push(result);
+  }
+
+  load(other) {
+    if (other instanceof DBResult) {
+      this.push(other);
+    } else if (Array.isArray(other)) {
+      other.forEach(res => this.push(res), this);
+    } else if (other instanceof DBResultList) {
+      other.list.forEach(res => this.push(res), this);
+    }
+  }
+}
+
+class DBResult {
+  // Record (or JSON obj), id, ok, rev, sym, DBError (or err), status
+
+  constructor() {
+    this._ok = false;
+  }
+
+  get req() {
+    return this._req;
+  }
+
+  set req(val) {
+    this._req = val;
+  }
+
+  get ok() {
+    return this._ok;
+  }
+
+  set ok(val) {
+    return this._ok = val;
+  }
+
+  get id() {
+    return this._id;
+  }
+
+  set id(val) {
+    this._id = val;
+  }
+
+  get rev() {
+    return this._rev;
+  }
+
+  set rev(val) {
+    this._rev = val;
+  }
+
+  get sym() {
+    return this._sym;
+  }
+
+  set sym(val) {
+    this._sym = val;
+  }
+
+  get record() {
+    return this._rec;
+  }
+
+  set record(val) {
+    if (val instanceof Record) {
+      this._rec = val;
+    } else {
+      this._rec = new Record(val);
+    }
+
+    if (this._rec.tod) {
+      this.ok = true;
+      this.id = this._rec.id;
+    }
+
+    if (val._rev) {
+      this.rev = val._rev;
+    } else if (val.rev) {
+      this.rev = val.rev;
+    }
+  }
+
+  get error() {
+    // DBError
+    return this._err;
+  }
+
+  set error(val) {
+    if (val instanceof DBError) {
+      this._err = val;
+    } else {
+      this._err = new DBError(null, val);
+    }
+
+    this._ok = false;
+  }
+
+  get status() {
+    if (this._err) {
+      return this._err.status;
+    }
+
+    return 0;
+  }
+
+  set status(val) {
+    // For successful response from a few DB APIs
+    this.ok = val.ok;
+    this.id = val.id;
+    this.rev = val.rev;
   }
 }
 
 class DBError extends Error {
-  constructor(msg, err=null) {
-    super(msg);
+  constructor(msg, err = null) {
+    if (msg) {
+      super(msg);
+      this.name = "DBError";
+    } else {
+      super(err.message);
+      this.name = err.name;
+    }
+
     this.err = err;
-    this.name = "DBError";
+  }
+
+  get status() {
+    if (this._err) {
+      return this._err.status;
+    }
+
+    return 5000;
   }
 }
 
@@ -1275,25 +1967,102 @@ class DataDB {
 
   }
 
+  merge(into, from) {
+    // Returns whether any changes were made to "into" or not
+    // Default algo -- Force merge
+    let merged = false;
+    if (from.h) {
+      into.h = from.h;
+      merged = true;
+    }
+
+    if (from.f) {
+      into.f = from.f;
+      merged = true;
+    }
+
+    return merged;
+  }
+
+  async resolveConflict(doc, dbres) {
+    // Returns DBResult
+    let result = new DBResult();
+    if (!dbres.ok && dbres.status == 409) {    // conflict
+      let dbresult = await this.db.get(doc._id);
+      let dbDoc = JSON.parse(JSON.stringify(dbresult.record.rec));
+      if (this.merge(dbDoc, doc)) {
+        console.log("Merged and saving rev [" + dbDoc._rev + "]");
+        return await this.db.put(dbDoc);
+      } else {
+        result.error = new DBError("Unable to merge [" + dbDoc._id + "]");
+        return result;
+      }
+    } 
+
+    return dbres;
+  }
+
+  async resolve(from, dbres) {    // from and dbres (arrays) - matched by their index order
+    // On Success/Failure: Returns one or list of DBResult
+
+    if (Array.isArray(from)) {
+      let resps = [];
+      let hasErrors = false;
+      for (let i = 0; i < from.length; i++) {
+        try {
+          let resp = await this.resolveConflict(from[i], dbres[i]);
+          resps.push(resp);
+        } catch (respErr) {
+          hasErrors = true;
+          resps.push(respErr);
+        }
+      }
+
+      if (hasErrors) {
+        throw resps;
+      } else {
+        return resps;
+      }
+    } else {
+      return await this.resolveConflict(from, dbres);
+    }
+  }
+
   async fetch() {
     console.log("Cannot call Abstract DB.fetch()")
   }
 
-  async fetchAll(start, end, b, c) {
-    if (typeof (start) === "string") {
-      start = Math.floor(Date.parse(start) / 60000) * 60;
+  async save(doc) {
+    let result = null;
+    try {
+      if (Array.isArray(doc)) {
+        result = await this.db.putBulk(doc);
+      } else {
+        result = await this.db.put(doc);
+      }
+
+      if (!result.ok) {
+        result = await this.resolve(doc, result);
+      }
+    } catch (err) {
+      result = await this.resolve(doc, err);
     }
 
-    if (typeof (end) === "string") {
-      end = Math.floor(Date.parse(end) / 60000) * 60;
-    }
+    return result;
+  }
 
-    let result = []
+  async fetchAll(dtRange, b, c) {
+    let result = new DBResultList();
+    let start = dtRange.startLMinBSec;
+    let end = dtRange.endLMinBSec;
     for (; start <= end; start += 60) {
       try {
         result.push(await this.fetch(start, b, c));
       } catch (err) {
-        result.push(err);
+        let dbresult = new DBResult();
+        dbresult.id = start;
+        dbresult.error = err;
+        result.push(dbresult);
       }
     }
 
@@ -1302,28 +2071,27 @@ class DataDB {
 }
 
 class OptionsDB extends DataDB {
-  constructor(a, b, c, d) {
+  constructor(dbreq) {
     super();
-    this.db_name = a + b + c + "_" + d;
+    this.db_name = dbreq.a + dbreq.b + dbreq.c + "_" + dbreq.exp;
     this.db = new DBOps(this.db_name);
   }
 
-  async save(doc) {
-    return await this.db.put(doc);
-  }
+  async fetch(reqDt, stks, opts) {
 
-  async fetch(dttm, stks, opts) {
-    if (typeof (dttm) === "string") {
-      dttm = Math.floor(Date.parse(dttm) / 60000) * 60;    // msec -> sec & rounded to a minute
+    let result = new DBResultList();
+    let dttm = 0;
+    if (reqDt instanceof DateRange) {
+      dttm = reqDt.startLMinBSec;
+    } else {
+      dttm = reqDt;
     }
-
-    let result = [];
     for (let i = 0; i < stks.length; i++) {
       for (let j = 0; j < opts.length; j++) {
         let id = dttm.toString() + ":" + stks[i].toString() + ":" + opts[j];
-        //console.log("Getting [" + id + "]");
+        //console.log("Getting from DB [" + id + "]");
         try {
-          result.push(await this.db.get(id))
+          result.push(await this.db.get(id));
         } catch (err) {
           console.log("Caught and suppressed in OptionsDB fetch [" + err + "]")
           result.push(err);
@@ -1334,18 +2102,12 @@ class OptionsDB extends DataDB {
     return result
   }
 
-  async fetchAll(start, end, stks, opts) {
-    if (typeof (start) === "string") {
-      start = Math.floor(Date.parse(start) / 60000) * 60;
-    }
-
-    if (typeof (end) === "string") {
-      end = Math.floor(Date.parse(end) / 60000) * 60;
-    }
-
-    let result = [];
+  async fetchAll(dtRange, stks, opts) {
+    let result = new DBResultList();
+    let start = dtRange.startLMinBSec;
+    let end = dtRange.endLMinBSec;
     for (; start <= end; start += 60) {
-      result = result.concat(await this.fetch(start, stks, opts));
+      result.load(await this.fetch(start, stks, opts));
     }
 
     return result
@@ -1353,42 +2115,26 @@ class OptionsDB extends DataDB {
 }
 
 class FuturesDB extends DataDB {
-  constructor(a, b, c, d) {
+  constructor(dbreq) {
     super();
-    this.db_name = a + b + c + "_" + d;
+    this.db_name = dbreq.a + dbreq.b + dbreq.c + "_" + dbreq.exp;
     this.db = new DBOps(this.db_name);
   }
 
-  async save(doc) {
-    return await this.db.put(doc);
-  }
-
-  async fetch(dttm, b, c) {
-    if (typeof (dttm) === "string") {
-      dttm = Math.floor(Date.parse(dttm) / 60000) * 60;    // msec -> sec & rounded to a minute
-    }
-
-    return await this.db.get(dttm.toString());
+  async fetch(reqDt, b, c) {
+    return await this.db.get(reqDt.startLMinBSec.toString());
   }
 }
 
 class IndexDB extends DataDB {
-  constructor(a, b, c) {
+  constructor(dbreq) {
     super();
-    this.db_name = a + b + c;
+    this.db_name = dbreq.a + dbreq.b + dbreq.c;
     this.db = new DBOps(this.db_name);
   }
 
-  async save(doc) {
-    return await this.db.put(doc);
-  }
-
-  async fetch(dttm, b, c) {
-    if (typeof (dttm) === "string") {
-      dttm = Math.floor(Date.parse(dttm) / 60000) * 60;    // msec -> sec & rounded to a minute
-    }
-
-    return await this.db.get(dttm.toString());
+  async fetch(reqDt, b, c) {
+    return await this.db.get(reqDt.startLMinBSec.toString());
   }
 }
 
@@ -1408,13 +2154,13 @@ class DBFactory {
 
   }
 
-  static create(a, b, c, d) {
-    if ("OPTIONS" === b) {
-      return new OptionsDB(a, b, c, d);
-    } else if ("FUTURES" === b) {
-      return new FuturesDB(a, b, c, d);
-    } else if ("INDEX" === b) {
-      return new IndexDB(a, b, c);
+  static create(dbreq) {
+    if (dbreq.forOption) {
+      return new OptionsDB(dbreq);
+    } else if (dbreq.forFuture) {
+      return new FuturesDB(dbreq);
+    } else if (dbreq.forIndex) {
+      return new IndexDB(dbreq);
     } else {
       throw new DBError("Unknown DB Type");
     }
@@ -1426,82 +2172,122 @@ class DBFacade {
 
   }
 
-  static async fetchNsave(db, a, b, c, d, e, f, g, h, i) {
-    let data = await Fetcher.getRecords(a, b, c, d, e, f, g, h, i);
-    if (data.count() > 0) {
-      const recs = data.data();
-      for (let i = 0; i < recs.length; i++) {
-        await db.save(recs[i]).catch(error => { console.log("fetchNsave failed [" + error + "]") } );
-      }
-
-      return recs;
+  static async fetchNsave(db, dbreq) {
+    let webdata = null;
+    try {
+      webdata = await Fetcher.getRecords(dbreq.a, dbreq.b, dbreq.c,
+        dbreq.exp, dbreq.reqDts, dbreq.stks, dbreq.cepe, dbreq.range);
+    } catch (weberr) {
+      let result = new DBResult();
+      result.req = dbreq;
+      result.error = weberr;
+      return new DBResultList(result);
     }
 
-    return [];
+    if (webdata.count() > 0) {
+      const recs = webdata.data();
+      const results = new DBResultList();
+      for (let i = 0; i < recs.length; i++) {
+        let result = await db.save(recs[i]);
+        if (!result.ok) {
+          // Unable to save, but that is fine
+          //console.log(result.error);
+        }
+
+        result = new DBResult();
+        result.req = dbreq;
+        result.record = recs[i];
+        results.push(result);
+      }
+
+      return results;
+    }
+
+    let result = new DBResult();
+    result.req = dbreq;
+    result.error = new WebError({ code: 5555, msg: "No Data Found" });
+    return new DBResultList(result);
   }
 
-  static async dbfetchNsave(db, a, b, c, d, e, f, g, h, i, recPush = true) {
-    // recPush - push record on recs for Futures and Indexes
-    //           concat (array of recs) on recs for Options
-    let recs = [];
-    if (e !== null && e !== undefined) {
-      for (let i = 0; i < e.length; i++) {
-        const dbRecs = await db.fetch(e[i], f, g).catch(error => {
-          console.log("Fetching from catch [" + error + "]");
-          return DBFacade.fetchNsave(db, a, b, c, d, e, f, g, h, i);
-        });
-        if (recPush) {
-          recs.push(dbRecs);
-        } else {
-          recs = recs.concat(dbRecs);
-        }
-      }
-    } else {
-      recs = await db.fetchAll(h, i, f, g).catch(error => {
-        console.log("Fetching from catch [" + error + "]");
-        return DBFacade.fetchNsave(db, a, b, c, d, e, f, g, h, i);
-      });
+  static async dbfetchNsave(db, dbreq) {
+    // Returns a list of DBResults
+    let totCount = dbreq.expectedCount;
+    console.log("Exp [" + totCount + "]");
+    if (totCount > 200) {
+      throw new DBError("Too many records requested, please reduce the query size");
     }
 
-    let badRecs = 0;
-    if (recs && recs.length > 0) {
-      for (let i = 0; i < recs.length; i++) {
-        if (recs[i]._id === undefined || recs[i]._rev === undefined) {
-          // Not a valid record from DB
-          badRecs++;
-        }
-      }
+    let svcdReqs = [];
+    let unsvcdReqs = [];
 
-      if (badRecs > recs.length / 10) {     // More than 10% bad records
-        console.log("Too many bad records [" + badRecs + "]");
-        return DBFacade.fetchNsave(db, a, b, c, d, e, f, g, h, i);
+    // requests spread over dates and strikes (only one date/range, strike and cepe)
+    let spread = dbreq.spread(15);
+
+    let results = new DBResultList();
+    for (let i = 0; i < spread.length; i++) {
+      let tempList = new DBResultList();
+      if (spread.list[i].reqDts) {
+        tempList.load(await db.fetch(spread.list[i].reqDts[0], spread.list[i].stks, spread.list[i].cepe));
       } else {
-        return recs;
+        tempList.load(await db.fetchAll(spread.list[i].range, spread.list[i].stks, spread.list[i].cepe));
       }
-    } else {
-      return DBFacade.fetchNsave(db, a, b, c, d, e, f, g, h, i);
+
+      if (tempList.hasOK) {
+        svcdReqs.push(spread.list[i]);
+      } else {
+        unsvcdReqs.push(spread.list[i]);
+      }
+
+      results.load(tempList);
     }
+
+    // Process the unserviced/failed ones
+    if (unsvcdReqs.length > 5) {
+      console.log("Unsvcd [" + unsvcdReqs.length + "]");
+
+      results.load(await DBFacade.fetchNsave(db, dbreq));
+    } else {
+      for (let i = 0; i < unsvcdReqs.length; i++) {
+        spread = unsvcdReqs[i].spread(15);
+        for (let j = 0; j < spread.length; j++) {
+          results.load(await DBFacade.fetchNsave(db, spread.list[j]));
+        }
+      }
+    }
+
+    let okResults = new DBResultList();
+    for (let k = 0; k < results.length; k++) {
+      if (results.list[k].ok) {
+        if (dbreq.match(results.list[k].record)) {
+          okResults.push(results.list[k]);
+        }
+      }
+    }
+
+    return new RecordList(dbreq.sym, okResults);
   }
 
   static async fetchRecs(a, b, c, d, e, f, g, h, i) {
-    let db = DBFactory.create(a, b, c, d);
-    let recs = [];
-    if (f !== null && f !== undefined) {
-      // Must be options
-      return await DBFacade.dbfetchNsave(db, a, b, c, d, e, f, g, h, i, false);
-    } else if (d != null && d != undefined) {
-      // Futures
-      return await DBFacade.dbfetchNsave(db, a, b, c, d, e, f, g, h, i, true);
-    } else {
-      // Index
-      return await DBFacade.dbfetchNsave(db, a, b, c, d, e, f, g, h, i, true);
+    let abc = DBFacade.symList.getLeaf(a, b, c);
+    let dbreq = new DBRequest(abc);
+    dbreq.exp = d;
+    if (e) {
+      dbreq.reqDts = e;
     }
+    dbreq.stks = f;
+    dbreq.cepe = g;
+    if (h && i) {
+      dbreq.setRange(h, i);
+    }
+
+    return await DBFacade.dbfetchNsave(DBFactory.create(dbreq), dbreq);
   }
 
   static async fetchLists(sym = null, d = null) {
     if (sym === null) {
       let response = await Fetcher.getXTM();
-      return new SymbolList(response.data()[0]);
+      DBFacade.symList = new SymbolList(response.data()[0]);
+      return DBFacade.symList;
     }
 
     if (d === null) {
@@ -1537,3 +2323,4 @@ class DBFacade {
     return { stks: sym.getStrikes(d), days: sym.getDays(d) };
   }
 }
+DBFacade.symList = null;

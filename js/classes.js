@@ -27,7 +27,7 @@ class WebRequest {
 
   forDays(days) {
     if (days !== null && days !== undefined) {
-      this.dts = days
+      this.dts = days.map(function (val) { return val.startLMinBSec })
     }
 
     return this
@@ -49,11 +49,10 @@ class WebRequest {
     return this
   }
 
-  forDateRange(start, end) {
-    if (start !== null && start !== undefined &&
-        end !== null && end !== undefined) {
-      this.dtst = start
-      this.dten = end
+  forDateRange(range) {
+    if (range) {
+      this.dtst = range.startLMinBSec
+      this.dten = range.endLMinBSec
     }
 
     return this
@@ -214,12 +213,12 @@ class Fetcher {
     return Fetcher.get(webreq);
   }
 
-  static async getRecords(exc, inst, sym, exp, days = null, stks = null, optys = null, start = null, end = null) {
-    if (start === null || start === undefined) {
+  static async getRecords(exc, inst, sym, exp, days = null, stks = null, optys = null, range = null) {
+    if (range === null || range === undefined) {
       const webreq = new WebRequest().forXTM(exc, inst, sym).forExpiry(exp).forDays(days).forStrikes(stks).forOptionTypes(optys).getRecords();
       return Fetcher.get(webreq);
     } else {
-      const webreq = new WebRequest().forXTM(exc, inst, sym).forExpiry(exp).forDateRange(start, end).forStrikes(stks).forOptionTypes(optys).getRecords();
+      const webreq = new WebRequest().forXTM(exc, inst, sym).forExpiry(exp).forDateRange(range).forStrikes(stks).forOptionTypes(optys).getRecords();
       return Fetcher.get(webreq);
     }
   }
