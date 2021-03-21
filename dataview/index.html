@@ -9,10 +9,14 @@
 
   <!-- Bootstrap CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta1/dist/css/bootstrap.min.css" rel="stylesheet"
-        integrity="sha384-giJF6kkoqNQ00vy+HMDP7azOuL0xtbfIcaT9wjKHr8RbDVddVHyTfAAsrekwKmP1" crossorigin="anonymous">
+    integrity="sha384-giJF6kkoqNQ00vy+HMDP7azOuL0xtbfIcaT9wjKHr8RbDVddVHyTfAAsrekwKmP1" crossorigin="anonymous">
+
+  <!-- Bootstrap icon font -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.4.0/font/bootstrap-icons.css">
 
   <!--Plugin CSS file with desired skin-->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/ion-rangeslider/2.3.1/css/ion.rangeSlider.min.css" />
+  <link rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/ion-rangeslider/2.3.1/css/ion.rangeSlider.min.css" />
 
   <!--jQuery-->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
@@ -23,18 +27,20 @@
   <script src="//cdn.jsdelivr.net/npm/pouchdb@7.2.1/dist/pouchdb.min.js"></script>
   <script src="/js/classes.js"></script>
   <script src="/js/dbaccess.js"></script>
+  <script src="/js/uicomps.js"></script>
+  <script src="/js/errors.js"></script>
+  
   <style>
   </style>
 </head>
 
 <body>
-
   <div id="main">
     <div class="container">
+      <div id="erroralert" class="row"></div>
       <div class="row text-center">
         <h1>Data Viewer</h1>
       </div>
-
 
       <div class="row mb-3">
         <label class="visually-hidden" for="autocomplete">Freeform</label>
@@ -42,8 +48,6 @@
           <div class="input-group-text">@</div>
           <input class="form-control" id="autocomplete" list="autocompleteOptions" placeholder="Freeform Type">
           <datalist id="autocompleteOptions">
-            <option value="San Francisco">
-            <option value="New York">
           </datalist>
         </div>
       </div>
@@ -108,6 +112,7 @@
         <div class="col-md">
           <div class="form-floating">
             <input type="text" class="form-control" id="quantity" placeholder="1">
+            <label class="form-label" for="quantity">Qty</label>
           </div>
         </div>
 
@@ -131,15 +136,13 @@
 
       <div class="row mb-3">
         <div class="col-4 ms-3 form-check form-switch">
-          <input class="form-check-input" type="checkbox" id="timesliderThumbs" onclick="switchThumbs()" checked>
+          <input class="form-check-input" type="checkbox" id="timesliderThumbs"  onclick="switchThumbs()" aria-checked="false">
           <label class="form-check-label" for="timesliderThumbs">Time Range</label>
         </div>
         <div>
-          <input type="text" id="timeslider" name="TimeSlider" value="" />
+          <input type="text" class="js-range-slider" id="timeslider" name="TimeSlider" value="" />
         </div>
       </div>
-
-      <div id="erroralert" class="row"></div>
 
       <div class="row">
         <div class="col-9">
@@ -156,52 +159,128 @@
 
       <pre class="text-break" style="white-space:normal" id="output"></pre>
 
-      <button class="btn btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#collapseExample" aria-expanded="true" aria-controls="collapseExample">
+      <!-- <button class="btn btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#collapseExample" aria-expanded="true" aria-controls="collapseExample">
         Button with data-bs-target
       </button>
 
       <button class="btn btn-primary" type="button" onclick="toggleCollapse('collapseExample')">
         Button with JS
-      </button>
+      </button> -->
 
       <p />
 
-      <div class="collapse show" id="collapseExample">
+      <!-- <div class="collapse show" id="collapseExample">
         <div class="card text-center mb-3">
           <div class="card-header">
-            <ul class="nav nav-pills card-header-pills">
-              <li class="nav-item">
-                <a class="nav-link active" href="#">Active</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link" href="#">Link</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link disabled" href="#" tabindex="-1" aria-disabled="true">Disabled</a>
-              </li>
-            </ul>
+            <div class="d-flex">
+              <div class="me-auto align-self-center">
+                <span>My Strategy 1</span>
+              </div>
+              <ul class="nav nav-pills" role="tablist">
+                <li class="nav-item" role="presentation">
+                  <a href="#" class="nav-link active" id="legs-tab" data-bs-toggle="pill" data-bs-target="#legs" type="button" role="tab" aria-controls="legs" aria-selected="true">Legs</a>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <a href="#" class="nav-link" id="greeks-tab" data-bs-toggle="pill" data-bs-target="#greeks" type="button" role="tab" aria-controls="greeks" aria-selected="false">Greeks</a>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <a href="#" class="nav-link disabled" id="other-tab" data-bs-toggle="pill" data-bs-target="#other" type="button" role="tab" aria-controls="other" aria-selected="false" tabindex="-1" aria-disabled="true">Disabled</a>
+                </li>
+              </ul>
+            </div>
           </div>
-          <div class="card-body">
-            <h5 class="card-title">Special title treatment</h5>
-            <p class="card-text">With supporting text below as a natural lead-in to additional content.</p>
-            <a href="#" class="btn btn-primary">Go somewhere</a>
+
+          <div class="card-body tab-content">
+            <div class="tab-pane fade show active" id="legs" role="tabpanel" aria-labelledby="legs-tab">
+              <div class="table-responsive">
+                <table class="table caption-top table-sm">
+                  <thead>
+                    <tr>
+                      <th scope="col">#</th>
+                      <th scope="col">Instrument</th>
+                      <th scope="col">B/S</th>
+                      <th scope="col">Qty</th>
+                      <th scope="col">Entry Price</th>
+                      <th scope="col">Current Price</th>
+                      <th scope="col">Live P&L</th>
+                      <th scope="col">Exit Price</th>
+                      <th scope="col">P&L</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th scope="row">1</th>
+                      <td>N50 18Mar2021 15000PE</td>
+                      <td>Sell</td>
+                      <td>-75</td>
+                      <td>80</td>
+                      <td>82</td>
+                      <td class="text-danger">-150</td>
+                      <td>0</td>
+                      <td>0.00</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">2</th>
+                      <td>N50 25Mar2021 15000PE</td>
+                      <td>Buy</td>
+                      <td>75</td>
+                      <td>80</td>
+                      <td>82</td>
+                      <td>150</td>
+                      <td>0</td>
+                      <td>0.00</td>
+                    </tr>
+                  </tbody>
+
+                  <tfoot>
+                    <tr>
+                      <td></td>
+                      <td></td>
+                      <td></td>
+                      <td></td>
+                      <td></td>
+                      <td></td>
+                      <td>0</td>
+                      <td></td>
+                      <td>0</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+            <div class="tab-pane fade" id="greeks" role="tabpanel" aria-labelledby="greeks-tab">
+              Greeks
+            </div>
+            <div class="tab-pane fade" id="other" role="tabpanel" aria-labelledby="other-tab">
+              Other
+            </div>
           </div>
         </div>
-      </div>
+      </div> -->
 
-      <div class="row row-cols-1 row-cols-md-3 mb-3 text-center">
+      <!-- <div class="row row-cols-1 row-cols-md-3 row-cols-lg-4 mb-3" id="stgList">
         <div class="col">
           <div class="card mb-3 shadow-sm">
             <div class="card-header">
-              Featured
+              <div class="d-flex">
+                <div class="text-break me-auto" contenteditable="true">
+                  My Strategy 1
+                </div>
+                <div class="me-2">
+                  <a class="bi-pencil-square text-primary" href="#" onclick="toggleCollapse('collapseExample')" aria-label="Edit"></a>
+                </div>
+                <div>
+                  <a class="bi-trash text-danger" href="#" onclick="toggleCollapse('collapseExample')" aria-label="Remove"></a>
+                </div>
+              </div>
             </div>
-            <div class="card-body">
-              <h5 class="card-title">Special title treatment</h5>
-              <p class="card-text">With supporting text below as a natural lead-in to additional content.</p>
-              <a href="#" class="btn btn-primary" type="button" onclick="toggleCollapse('collapseExample')">Toggle Detailed View</a>
+            <div class="card-body text-center">
+              <h5 class="card-title text-success">1000</h5>
+              <span>4 Legs</span>
+              <a href="#" class="bi-arrows-expand text-primary" onclick="toggleCollapse('collapseExample')"></a>
             </div>
             <div class="card-footer text-muted">
-              2 days ago
+              <small>Created: 30 Feb 2021, 11:00</small>
             </div>
           </div>
         </div>
@@ -209,56 +288,88 @@
         <div class="col">
           <div class="card mb-3 shadow-sm">
             <div class="card-header">
-              Featured
+              <div>
+                My Strategy 2
+                <a class="bi-trash text-danger float-end" href="#" onclick="toggleCollapse('collapseExample')" aria-label="Remove"></a>
+                <a class="bi-pencil-square text-primary float-end me-2" href="#" onclick="toggleCollapse('collapseExample')" aria-label="Edit"></a>
+              </div>
             </div>
-            <div class="card-body">
-              <h5 class="card-title">Special title treatment</h5>
-              <p class="card-text">With supporting text below as a natural lead-in to additional content.</p>
-              <a href="#" class="btn btn-primary" type="button" onclick="toggleCollapse('collapseExample')">Toggle Detailed View</a>
+            <div class="card-body text-center">
+              <h5 class="card-title text-danger">-200.35</h5>
+              <span>4 Legs</span>
+              <a href="#" class="bi-arrows-expand text-primary" onclick="toggleCollapse('collapseExample')"></a>
             </div>
             <div class="card-footer text-muted">
-              2 days ago
+              <small>Created: 30 Feb 2021, 11:00</small>
             </div>
           </div>
         </div>
-      </div>
+        <div class="col" id="1615724301211">
+          <div class="card shadow-sm">
+            <div class="card-header">
+              <div>
+                tester
+                <a class="bi-trash text-danger float-end" href="#" aria-label="Remove"></a>
+                <a class="bi-pencil-square text-primary float-end me-2" href="#" aria-label="Edit"></a>
+              </div>
+            </div>
+            <div class="card-body text-center">
+              <h5 class="card-title text-success">20</h5>
+              <span>1 Legs</span>
+            </div>
+            <div class="card-footer text-muted">
+              <small>Created: 3/14/2021, 5:48:21 PM</small>
+            </div>
+          </div>
+        </div>
+      </div> -->
+      
+      <button class="btn btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#CollapseTables" aria-expanded="true" aria-controls="CollapseTables">
+        Collapse Tables
+      </button>
 
-      <div id="datatables">
+      <div class="collapse show" id="CollapseTables">
+        <div id="datatables">
+      </div>
       </div>
     </div>
   </div>
 
   <script type="text/javascript">
-
     var cacheSyms = null;
-    var strategy = new Strategy("tester");
+    var strategy = null;
 
-    var thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
+    $(document).ready(setLayout);
 
-    $("#timeslider").ionRangeSlider({
-      skin: "round",
-      type: thumbs,
-      grid: true,
-      min: UIUtils.dateToTS(new Date("2021-01-01T09:15:00+05:30")),
-      max: UIUtils.dateToTS(new Date("2021-01-01T15:30:00+05:30")),
-      from: UIUtils.dateToTS(new Date("2021-01-01T12:00:00+05:30")),
-      to: UIUtils.dateToTS(new Date("2021-01-01T13:00:00+05:30")),
-      force_edges: true,
-      prettify: UIUtils.tsToDate
-    });
+    function setLayout() {
+      strategy = new Strategy("tester");
 
-    // Initialize the dropdowns
-    UIUtils.addSpinner("exchange");
-    UIUtils.addSpinner("instrument");
-    UIUtils.addSpinner("underlying");
-    DBFacade.fetchLists().then(symList => {
-      cacheSyms = symList;
-      UIUtils.updSelectDropdown("exchange", symList.getAs());
-      UIUtils.rmSpinner("exchange");
-      let exc = document.getElementById("exchange").options[0].text;
-      pageUpdateLists("exchange", exc);
-      UIUtils.updAutocomplete(cacheSyms, "autocompleteOptions");
-    });
+      let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
+
+      $("#timeslider").ionRangeSlider({
+        skin: "round",
+        type: thumbs,
+        grid: true,
+        min: UIUtils.dateToTS(new Date("2021-01-01T09:15:00+05:30")),
+        max: UIUtils.dateToTS(new Date("2021-01-01T15:30:00+05:30")),
+        from: UIUtils.dateToTS(new Date("2021-01-01T12:00:00+05:30")),
+        to: UIUtils.dateToTS(new Date("2021-01-01T13:00:00+05:30")),
+        force_edges: true,
+        prettify: UIUtils.tsToDate
+      });
+
+      // Initialize the dropdowns
+      UIUtils.addSpinner("exchange");
+      UIUtils.addSpinner("instrument");
+      UIUtils.addSpinner("underlying");
+      DBFacade.fetchLists().then(symList => {
+        cacheSyms = symList;
+        UIUtils.updSelectDropdown("exchange", symList.getAs());
+        UIUtils.rmSpinner("exchange");
+        let exc = document.getElementById("exchange").options[0].text;
+        pageUpdateLists("exchange", exc);
+      });
+    }
 
     function toggleCollapse(cardNodeID) {
       var cardEl = document.getElementById(cardNodeID);
@@ -268,7 +379,7 @@
     }
 
     function switchThumbs() {
-
+      
       let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
 
       UIUtils.updateDatetimeSlider("timeslider", "days", thumbs === "single");
@@ -294,7 +405,7 @@
 
     function pageUpdateLists(selectID, selectedVal) {
       let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
-
+      
       UIUtils.updateLists(cacheSyms, selectID, selectedVal, "exchange", "instrument", "underlying",
         "expiries", "strikes", "ce_pe", "days", "timeslider", "erroralert", "autocompleteOptions",
         thumbs === "single");
@@ -302,29 +413,52 @@
 
     function addStrategy(id, action) {
       UIUtils.addSpinner(id);
-      let output = document.getElementById("output");
+      let output = document.getElementById("datatables");
       let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
+      if (thumbs === "double") {
+        UIUtils.showAlert("erroralert", "Cannot Buy/Sell Time Range");
+        return;
+      }
+
+      /* let sym = cacheSyms.getLeaf(document.getElementById("exchange").value,
+        document.getElementById("instrument").value,
+        document.getElementById("underlying").value);
+
+      let leg1 = new StrategyLeg(sym, document.getElementById("expiries").value, action, "1", "120", null, "12000", "CE");
+      let leg2 = new StrategyLeg(sym, document.getElementById("expiries").value, action, "1", "120", null, "13000", "PE");
+      strategy.add(leg1);
+      strategy.add(leg2);
+
+      $(output).append($(new StrategyCard().getFullCard(strategy)));
+
+      UIUtils.rmSpinner(id);
+      return; */
 
       UIUtils.getRecords("exchange", "instrument", "underlying",
         "expiries", "strikes", "ce_pe", "timeslider", thumbs === "single").then(response => {
-          //output.innerHTML = JSON.stringify(response);
-          let sym = cacheSyms.getLeaf(document.getElementById("exchange").value,
-            document.getElementById("instrument").value,
-            document.getElementById("underlying").value);
+          
+          let sym = response.sym;
+          let data = response.one;
+          let leg = null;
+          if (sym.isOption) {
+            leg = new StrategyLeg(sym, data.exp, "BUY" === action, document.getElementById("quantity").value, data.ltp, data.stk, data.opt);
+          } else if (sym.isFuture) {
+            leg = new StrategyLeg(sym, data.exp, "BUY" === action, document.getElementById("quantity").value, data.ltp);
+          } else {
+            throw new Error("Cannot add Index to a Strategy");
+          }
 
-          let records = new RecordList(sym, response).raw;
-          output.innerHTML = JSON.stringify(records[0]);
+          if (leg.entryValue) {
+            leg.curPrice = data.ltp;
+            console.log("leg value: " + leg.entryValue);
+            console.log(strategy.add(leg));
+            console.log(strategy.entryValue);
+          } else {
+            console.log(JSON.stringify(leg));
+            throw new Error("Unable to calculate entry value of the leg");
+          }
 
-          let leg = new StrategyLeg(sym, document.getElementById("expiries").value,
-            action, document.getElementById("quantity").value, records[0].ltp, null,
-            document.getElementById("strikes").value, document.getElementById("ce_pe").value);
-
-          console.log(JSON.stringify(leg));
-          console.log("leg value: " + leg.value);
-          console.log(strategy.add(leg));
-          console.log(strategy.value);
-
-          new DataTable().loadStrategy("datatables", strategy);
+          $(output).append($(new StrategyCard().getFullCard(strategy)));
 
           UIUtils.rmSpinner(id);
         }).catch(error => {
@@ -350,6 +484,7 @@
     function getRecords() {
       UIUtils.addSpinner("fetch");
       let thumbs = document.getElementById("timesliderThumbs").checked ? "double" : "single";
+
       UIUtils.getRecords("exchange", "instrument", "underlying",
         "expiries", "strikes", "ce_pe", "timeslider", thumbs === "single").then(response => {
           //output.innerHTML = JSON.stringify(response);
@@ -370,9 +505,13 @@
     }
 
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js" integrity="sha384-q2kxQ16AaE6UbzuKqyBE9/u/KzioAlnx2maXQHiDX9d4/zp8Ok3f+M7DPm+Ib6IU" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta1/dist/js/bootstrap.min.js" integrity="sha384-pQQkAEnwaBkjpqZ8RU1fF1AKtTcHJwFl3pblpTlHXybJjHpMYo79HY3hIi4NKxyj" crossorigin="anonymous"></script>
-
+  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"
+    integrity="sha384-q2kxQ16AaE6UbzuKqyBE9/u/KzioAlnx2maXQHiDX9d4/zp8Ok3f+M7DPm+Ib6IU"
+    crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta1/dist/js/bootstrap.min.js"
+    integrity="sha384-pQQkAEnwaBkjpqZ8RU1fF1AKtTcHJwFl3pblpTlHXybJjHpMYo79HY3hIi4NKxyj"
+    crossorigin="anonymous"></script>
+  
 </body>
 
 </html>

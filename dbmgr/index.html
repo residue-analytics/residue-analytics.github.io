@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="DB Manager">
+  <title>DB Manager</title>
+
+  <!--jQuery-->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta1/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-giJF6kkoqNQ00vy+HMDP7azOuL0xtbfIcaT9wjKHr8RbDVddVHyTfAAsrekwKmP1" crossorigin="anonymous">
+
+  <!-- Bootstrap icon font -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.4.0/font/bootstrap-icons.css">
+
+  <script src="//cdn.jsdelivr.net/npm/pouchdb@7.2.1/dist/pouchdb.min.js"></script>
+  <script src="/js/dbaccess.js"></script>
+  <style>
+  </style>
+</head>
+
+<body>
+  <div id="main">
+    <div class="container">
+      <div class="row text-center">
+        <h1>DB Manager</h1>
+      </div>
+
+      <div class="row row-cols-1 row-cols-md-3 row-cols-lg-4 mb-3" id="DBInfos">
+
+      </div>
+    </div>
+  </div>
+
+  <script type="text/javascript">
+    $(document).ready(layoutDBs);
+
+    function layoutDBs() {
+      let parent = $("#DBInfos");
+      dbmgr.fetchDBs().then(dblist => dblist.forEach(createCard, parent) );
+    }
+
+    function createCard(db_name) {
+      let parent = this;
+      dbmgr.info(db_name).then(function (info) {
+        let htmlStr = '<div class="col"> <div class="card mb-3 shadow-sm"><div class="card-header"><div>DB_NAME<a class="bi-trash text-danger float-end" href="#" aria-label="Remove"></a> <a class="bi-pencil-square text-primary float-end me-2" href="#" aria-label="Edit"></a </div> </div> <div class="card-body text-center"> <span>INFO_DATA</span> </div> </div </div>';
+        htmlStr = htmlStr.replace("DB_NAME", db_name);
+        htmlStr = htmlStr.replace("INFO_DATA", JSON.stringify(info));
+        let newCard = $(htmlStr);
+        parent.append(newCard);
+      });
+      
+    }
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js" integrity="sha384-q2kxQ16AaE6UbzuKqyBE9/u/KzioAlnx2maXQHiDX9d4/zp8Ok3f+M7DPm+Ib6IU" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta1/dist/js/bootstrap.min.js" integrity="sha384-pQQkAEnwaBkjpqZ8RU1fF1AKtTcHJwFl3pblpTlHXybJjHpMYo79HY3hIi4NKxyj" crossorigin="anonymous"></script>
+</body>
+
+</html>

@@ -20,7 +20,6 @@ class UIUtils {
       let optNode = document.createElement("option");
       optNode.value = optVal;
       parent.appendChild(optNode);
-      console.log(optNode);
     }
   }
 
@@ -86,17 +85,21 @@ class UIUtils {
     const child = document.getElementById(nodeID);
     let parent = null;
     if (child.type === "button") {
+      if (child.disabled) {
+        return;
+      }
+      parent = child.parentElement;
+
       child.disabled = true;
-      //child.setAttribute("data-name", child.innerText);
-      //child.innerText = "Loading...";
-      parent = child;
+      child.setAttribute("data-resname", child.innerText);
+      child.innerText = "Loading... ";  // Extra space after ...
 
       const spinner = document.createElement('span');
-      spinner.className = 'spinner-border spinner-border';
+      spinner.className = 'spinner-border spinner-border-sm';
       spinner.role = 'status';
-      spinner.innerHTML = `<span class="visually-hidden" > Loading...</span >`;
-      //parent.insertBefore(spinner, child);
-      parent.appendChild(spinner);
+      //spinner.innerHTML = `<span class="visually-hidden" > Loading...</span >`;
+
+      child.appendChild(spinner);
     } else {
       UIUtils.updSelectDropdown(nodeID, [], false, "0", "Loading...");
       child.disabled = true;
@@ -109,7 +112,7 @@ class UIUtils {
     let parent = null;
     if (child.type === "button") {
       child.disabled = false;
-      child.innerText = child.getAttribute("data-name");
+      child.innerText = child.getAttribute("data-resname");
       parent = child;
 
       const spinner = parent.querySelector('.spinner-border');
@@ -117,10 +120,14 @@ class UIUtils {
         parent.removeChild(spinner);
       }
     } else {
+      if (child.options[0].text === "Loading...") {
+        child.options.remove(0);
+      }
       child.disabled = false;
-      parent = child.parentElement;
+
     }
   }
+
 
   static showAlert(alertNodeID, message) {
     const parentDiv = document.getElementById(alertNodeID);
@@ -132,9 +139,10 @@ class UIUtils {
       '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
 
     parentDiv.appendChild(alert);
+    setTimeout(function () { $(".alert").alert('close') }, 2000);
   }
 
-  static updateDatetimeSlider(sliderID, daysNodeID, singleThumb=false) {
+  static updateDatetimeSlider(sliderID, daysNodeID, singleThumb = false) {
     let rangeSlider = $("#" + sliderID).data('ionRangeSlider');
     //let dateRange = UIUtils.datetimeRange(daysNodeID);
     const select = document.getElementById(daysNodeID);
@@ -159,8 +167,9 @@ class UIUtils {
   }
 
   static updateLists(cacheSyms, selectID, selectedVal, excNodeID, instNodeID,
-    undNodeID, expNodeID, stkNodeID, cepeNodeID, daysNodeID, sliderNodeID, errAlertID, autocompNodeID = null, singleThumb=false) {
+    undNodeID, expNodeID, stkNodeID, cepeNodeID, daysNodeID, sliderNodeID, errAlertID, autocompNodeID = null, singleThumb = false) {
     let excSel, instSel, ulySel, leaf = [null, null, null, null];
+
     switch (selectID) {
       case excNodeID:
         let exc = selectedVal;
@@ -209,7 +218,7 @@ class UIUtils {
           if (data.exps) {
             UIUtils.updSelectDropdown(expNodeID, data.exps, true);
             UIUtils.updateLists(cacheSyms, expNodeID, data.exps[0], excNodeID, instNodeID,
-              undNodeID, expNodeID, stkNodeID, cepeNodeID, daysNodeID, sliderNodeID, errAlertID, autocompNodeID);
+              undNodeID, expNodeID, stkNodeID, cepeNodeID, daysNodeID, sliderNodeID, errAlertID, autocompNodeID, singleThumb);
           }
           UIUtils.rmSpinner(expNodeID);
         }).catch(error => {
@@ -237,7 +246,7 @@ class UIUtils {
             UIUtils.updSelectDropdown(stkNodeID, data.stks, false, "all", "All Strikes");
           }
           UIUtils.updateLists(cacheSyms, daysNodeID, data.days[0], excNodeID, instNodeID,
-            undNodeID, expNodeID, stkNodeID, cepeNodeID, daysNodeID, sliderNodeID, errAlertID, autocompNodeID);
+            undNodeID, expNodeID, stkNodeID, cepeNodeID, daysNodeID, sliderNodeID, errAlertID, autocompNodeID, singleThumb);
           UIUtils.rmSpinner(stkNodeID);
           UIUtils.rmSpinner(daysNodeID);
           UIUtils.updateDatetimeSlider(sliderNodeID, daysNodeID, singleThumb);
@@ -255,14 +264,14 @@ class UIUtils {
 
   }
 
-  static async getRecords(excNodeID, instNodeID, undNodeID, 
-    expNodeID, stkNodeID, cepeNodeID, sliderNodeID, singleSlider=false) {
+  static async getRecords(excNodeID, instNodeID, undNodeID,
+    expNodeID, stkNodeID, cepeNodeID, sliderNodeID, singleSlider = false) {
 
     let rangeSlider = $("#" + sliderNodeID).data('ionRangeSlider');
 
     let stkNode = document.getElementById(stkNodeID);
     let stks = [];
-    
+
     if (stkNode.value == "all") {
       for (let i = 0; i < stkNode.options.length; i++) {
         if (stkNode.options[i].value !== stkNode.value) {
@@ -292,8 +301,6 @@ class UIUtils {
     }
   }
 
-
-
   static datetimeRange(nodeID) {
     // Returns { min: .., max: .. }
     // Sorts the option.value and returns min and max (text, having ISO format date)
@@ -320,16 +327,84 @@ class UIUtils {
   static tsToDate(ts) {
     var d = new Date(ts);
 
-    return d.toLocaleString("en-US", {dateStyle: "medium", timeStyle: "short"});
+    return d.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
   }
 }
 
 UIUtils.DAY_START = "T09:15:00+05:30";
+UIUtils.DAY_MID = "T12:00:00+05:30";
 UIUtils.DAY_END = "T15:30:00+05:30";
+
+class ResD3Timer {
+  // From : https://bl.ocks.org/mbostock/1098617
+
+  constructor(nodeID) {
+    this.width = 50;
+    this.height = 50;
+
+    this.fields = [
+      { value: 60, size: 60, label: "s", update: function (date) { return date.getSeconds(); } }
+    ];
+
+    this.arc = d3.svg.arc()
+      .outerRadius(this.width / 2.1)
+      .startAngle(0)
+      .endAngle(function (d) { return (d.value / d.size) * 2 * Math.PI; });
+
+    //console.log(d3.select("#"+nodeID));
+
+    this.svg = d3.select("#"+nodeID).append("svg")
+      .attr("width", this.width)
+      .attr("height", this.height);
+
+    this.field = this.svg.selectAll(".field")
+      .data(this.fields)
+      .enter().append("g")
+      .attr("transform", (d, i) => { return "translate(" + this.width / 2 + "," + this.height / 2 + ")"; })
+      .attr("class", "field");
+
+    this.field.append("path")
+      .attr("class", "path path--background")
+      .attr("d", this.arc);
+
+    this.path = this.field.append("path")
+      .attr("class", "path path--foreground");
+
+    this.label = this.field.append("text")
+      .attr("class", "label")
+      .attr("dy", ".35em");
+
+    this.update();
+  }
+
+  update() {
+    var now = new Date();
+
+    this.field.each(function (d) { d.previous = d.value, d.value = d.update(now); });
+    let that = this;
+    this.path.transition()
+      .ease("elastic")
+      .duration(750)
+      .attrTween("d", function(b) { that.arcTween(b); });
+
+    this.label.text(function (d) { return d.value + d.label; });
+    
+    setTimeout(function() {that.update();}, 1000 - (now % 1000));
+  }
+
+  arcTween(b) {
+    var i = d3.interpolate({ value: b.previous }, b);
+    let that = this;
+    console.log(that instanceof ResD3Timer);
+    return function (t) {
+      return that.arc(i(t));
+    };
+  }
+}
 
 class DataTable {
   constructor() {
-    
+
   }
 
   createTableRow(cols, elem = "td") {
@@ -400,110 +475,84 @@ class DataTable {
     }
 
     const nodata = "";
-    const tods = records.tods;
+    if (records.count == 0) {
+      throw new Error("No records fetched");
+    }
 
     if (records.sym.isOption) {
-      const chainMap = records.objects;
-
-      for (let i = 0; i < tods.length; i++) {
-        const chain = chainMap.get(tods[i]);
-        const table = document.createElement("table");
-        table.className = "table caption-top table-sm table-bordered";
-        table.style = "{ empty-cells: show; }";
-
-        const caption = document.createElement("caption");
-        caption.className = "text-center";
-        caption.innerHTML = "<strong>" + chain.sym.c + "</strong> Chain Snapshot at <strong>" + new Date(parseInt(chain.tod) * 1000).toString() + "</strong>";
-        table.appendChild(caption);
-
-        const head = document.createElement("thead");
-        head.appendChild(this.createTableRow(["OI", "LTP", "Strike Price", "LTP", "OI"], "th"));
-        table.appendChild(head);
-
-        const body = document.createElement("tbody");
-
-        const sortedStrikes = chain.getStrikes();
-        for (let j = 0; j < sortedStrikes.length; j++) {
-          let pair = chain.getPair(sortedStrikes[j]);
-          let rowData = [];
-          if (pair.ce) {
-            if (pair.ce.fs) {
-              let t = pair.ce.fs[0].o;
-              rowData.push(t ? t : nodata);
-              t = pair.ce.fs[0].p;
-              rowData.push(t ? t : nodata);
-            } else {
-              rowData.push(nodata, nodata);
-            }
-          } else {
-            rowData.push(nodata, nodata);
-          }
-
-          rowData.push(sortedStrikes[j]);
-
-          if (pair.pe) {
-            if (pair.pe.fs) {
-              let t = pair.pe.fs[0].p;
-              rowData.push(t ? t : nodata);
-              t = pair.pe.fs[0].o;
-              rowData.push(t ? t : nodata);
-            } else {
-              rowData.push(nodata, nodata);
-            }
-          } else {
-            rowData.push(nodata, nodata);
-          }
-
-          body.appendChild(this.createTableRow(rowData));
-        }
-
-        table.appendChild(body);
+      if (records.count == 1) {
+        let table = new RecordListPresenter().getTableNode(records);
         datatables.appendChild(table);
+      } else {
+        const chainMap = records.objects;
+        const tods = records.tods;
+        for (let i = 0; i < tods.length; i++) {
+          const chain = chainMap.get(tods[i]);
+
+          let table = new OptionChainPresenter().getTableNode(chain);
+
+          datatables.appendChild(table);
+        }
       }
     } else {
-      const objects = records.objects;
-
-      const table = document.createElement("table");
-      table.className = "table caption-top table-sm table-bordered";
-      table.style = "{ empty-cells: show; }";
-
-      const caption = document.createElement("caption");
-      caption.className = "text-center";
-      caption.innerHTML = "<strong>" + records.sym.c + "</strong> Snapshots";
-      table.appendChild(caption);
-
-      const head = document.createElement("thead");
-      head.appendChild(this.createTableRow(["Date-Time", "Close", "Volume"], "th"));
-      table.appendChild(head);
-
-      const body = document.createElement("tbody");
-      for (let i = 0; i < tods.length; i++) {
-        const todrec = objects.get(tods[i]);     // One record per ts
-
-        if (todrec.C) {
-          body.appendChild(this.createTableRow([new Date(parseInt(todrec.tod) * 1000).toString(), todrec.C, todrec.V]));
-        }
-      }
-
-      table.appendChild(body);
+      let table = new RecordListPresenter().getTableNode(records);
       datatables.appendChild(table);
     }
   }
 }
 
+class StrategyList {
+  constructor() {
+    this._stgs = new Map()
+  }
+
+  keys() {
+    return this._stgs.keys();
+  }
+
+  has(stg) {
+    let id = stg;
+    if (stg instanceof Strategy) {
+      id = stg.id;
+    }
+
+    return this._stgs.has(id);
+  }
+
+  get(id) {
+    return this._stgs.get(id);
+  }
+
+  add(strategy) {
+    if (strategy) {
+      this._stgs.set(strategy.id, strategy);
+    }
+  }
+
+  delete(stg) {
+    let id = stg;
+    if (stg instanceof Strategy) {
+      id = stg.id;
+    }
+
+    this._stgs.delete(id);
+  }
+
+  load(owner) {
+    // Load from the DB for this owner
+  }
+
+  save(owner) {
+    // Save in the DB for this owner
+  }
+}
+
 class Strategy {
   constructor(name) {
+    this._id = Date.now();
     this._name = name;
-    this._tmstmp = Date.now();
+    this._lastUpdTime = null;
     this._legs = [];
-  }
-
-  get name() {
-    return this._name;
-  }
-
-  get time() {
-    return this._tmstmp;
   }
 
   add(leg, settle = false) {
@@ -525,35 +574,47 @@ class Strategy {
     }
 
     this._legs.push(leg);
+
     return true;
   }
 
-  get count() {
-    return this._legs.length;
-  }
-  get legs() {
-    return this._legs;
-  }
-
-  get value() {
+  get entryValue() {
     let total = 0;
     for (let i = 0; i < this._legs.length; i++) {
-      total += this._legs[i].value;
+      if (this._legs[i].isBuy) {
+        total -= this._legs[i].entryValue;
+      } else {
+        total += this._legs[i].entryValue;
+      }
     }
 
     return total;
   }
 
-  async updateEarnings(tmstmp, resolve, reject) {
+  get curValue() {
+    let total = 0;
+    for (let i = 0; i < this._legs.length; i++) {
+      if (this._legs[i].isBuy) {
+        total -= this._legs[i].curValue;
+      } else {
+        total += this._legs[i].curValue;
+      }
+    }
+
+    return total;
+  }
+
+  async updatePrice(tmstmp, resolve, reject) {
     const promises = [];
     for (let i = 0; i < this._legs.length; i++) {
-      promises.push(this._legs[i].fetchNCalcEarnings(tmstmp));
+      promises.push(this._legs[i].updatePrice(tmstmp));
     }
 
     Promise.allSettled(promises).then((results) => {
-      let curValue = 0;
+      let curPosition = 0;
       let failure = false;
       let reasons = [];
+
       for (let i = 0; i < results.length; i++) {
         if (results[i].status === "rejected") {
           reasons.push(results[i].reason);
@@ -566,107 +627,193 @@ class Strategy {
       } else {
         for (let i = 0; i < results.length; i++) {
           if (results[i].status === "fulfilled") {
-            curValue += results[i].value;
+            curPosition += results[i].value.curPosition;
           }
         }
 
-        resolve(curValue);
+        resolve(curPosition);
       }
     });
+  }
+
+  get id() {
+    return this._id;
+  }
+
+  set id(val) {
+    this._id = val;
+  }
+
+  get name() {
+    return this._name;
+  }
+
+  set name(val) {
+    this._name = val;
+  }
+
+  get lastUpdateTime() {
+    return this._lastUpdTime;
+  }
+
+  get count() {
+    return this._legs.length;
+  }
+
+  get legs() {
+    return this._legs;
   }
 }
 
 LOT_SIZE = {
-  VK349: 25,
-  IMRO45: 75,
-  RP17: 40
+  BN12: 25,
+  N50: 75,
+  FN20: 40
 };
 
 class StrategyLeg {
-  constructor(sym, exp, bs, qty, prc, tmstmp=null, stk=null, cepe=null) {
-    this._a = sym.a;
-    this._b = sym.b;
-    this._c = sym.c;
-    this._e = exp;
-    this._s = stk;
-    this._cp = cepe;
+  constructor(sym = null, exp, isBuy, qty, prc, stk = null, cepe = null) {
 
-    this._buy = "BUY" === bs;  // If not BUY, it's a SELL
-    this._prc = prc;           // Price per share (needs to mul by lot size)
-    this.lots = qty;
-    
-    this._opt = sym.isOption;  // Only Futures & Options
+    if (sym !== null) {
+      if (sym.isIndex) {
+        throw new Error("Invalid type of instrument for strategy");
+      }
 
-    this.timestamp = tmstmp;
-    
-    this._open = this.lots > 0 ? true : false;
-
-    this.curPrice = prc;
-
-    this._stllegs = [];      // Settlement Legs
-  }
-
-  get isOpen() {
-    return this._open;
-  }
-
-  get isClosed() {
-    return !this.isOpen;
-  }
-
-  get isBuy() {
-    return this._buy;
-  }
-
-  get lots() {
-    return this._q;
-  }
-
-  set lots(val) {
-    this._q = val;
-    this._tq = this._q * LOT_SIZE[this._c];
-    this._val = this._tq * this._prc;
-  }
-
-  get tqty() {
-    return this._tq;
-  }
-
-  get price() {
-    return this._prc;
-  }
-
-  set price(val) {
-    this._prc = val;
-    this._val = this.tqty * this._prc;
-  }
-
-  get curPrice() {
-    return this._curPrc;
-  }
-
-  set curPrice(val) {
-    this._curPrc = val;
-    this._curVal = this.tqty * this._curPrc;
-  }
-
-  get value() {
-    for (let i = 0; i < this._stllegs.length; i++) {
-
+      this._a = sym.a;
+      this._b = sym.b;
+      this._c = sym.c;
+      this._isOpt = sym.isOption;
     }
-    return this.isBuy ? (-this._val) : this._val;
+
+    this._id = Date.now();
+    this._key = null;
+    this._e = exp;        // in YYYYMMDD format (value of selector)
+    this._s = stk;
+    this._cp = cepe;      // "CE" or "PE"
+    this._buy = isBuy;    // If not BUY, it's a SELL
+    this._prc = prc;      // Entry Price per share (needs to mul by lot size)
+    this._curPrc = 0;
+    this._q = qty;        // Lots
+
+    this._lastUpdTm = null;
+    this._auditRecs = new Map();  // Changes made to this leg, tm -> clone of leg
+  }
+
+  clone() {
+    let newobj = new StrategyLeg(null, this._e, this._buy, this._q, this._prc,
+      this._s, this._cp);
+    newobj._id = this._id;
+    newobj._a = this._a;
+    newobj._b = this._b;
+    newobj._c = this._c;
+    newobj._isOpt = this._isOpt;
+    newobj._curPrc = this._curPrc;
+    newobj._lastUpdTm = this._lastUpdTm;
+    // We do not clone audit records, as cloned records are added to audit records (infinite depth)
+
+    return newobj;
+  }
+
+  matches(other) {
+    // Returns true if "this" matches "other" based on option/future attributes (not bs/qty/prc)
+    if (this.a === other.a && this.b === other.b && this.c === other.c &&
+      this.exp === other.exp && this.stk === other.stk && this.cepe == other.cepe) {
+      return true;
+    }
+
+    return false;
+  }
+
+  update(leg) {
+    // To Do
+    // Returns true if settlement done else false (no change made)
+    if (this.isClosed) {
+      return false;
+    }
+
+    if (this.matches(leg) && this.isBuy !== leg.isBuy) {
+      this._stllegs.push(leg);
+      if (this.lots === leg.lots) {
+        this._open = false;
+      }
+    } else {
+      return false;
+    }
+  }
+
+  async updatePrice(tmstmp=null) {
+    if (!tmstmp) {
+      tmstmp = Date.now();
+    }
+    
+    let resList = await this.getRecord(tmstmp);
+    this.curPrice = resList.one.ltp;  // This will call updatedNow()
+
+    return this;  // return self to aid the callbacks
+  }
+
+  async getRecord(tmstmp, endtm = null) {    // Javascript uses msec precision
+    // Round the timestamps to minute boundary.
+    if (endtm) {
+      return DBFacade.fetchRecs(this.a, this.b, this.c, this.exp,
+        null, [this.stk], [this.cepe], [Math.floor(tmstmp / 60000) * 60], [Math.floor(endtm / 60000) * 60]);
+    } else {
+      return DBFacade.fetchRecs(this.a, this.b, this.c, this.exp,
+        [Math.floor(tmstmp / 60000) * 60], [this.stk], [this.cepe], null, null);
+    }
+  }
+
+  get curPosition() {
+    // Position shows this legs P&L wrt entryPrice & curPrice (must be updated before calling)
+    return this.isBuy ? (this.curValue - this.entryValue) : (this.entryValue - this.curValue);
+  }
+
+  get entryValue() {
+    return this.tqty * this.entryPrice;
   }
 
   get curValue() {
-    return this.isBuy ? (-this._curVal) : this._curVal;
+    if (!this.curPrice) {
+      throw new ResError(ResErrorCode.NO_DATA, "Current Price not available");
+    }
+
+    return this.tqty * this.curPrice;
+  }
+
+  get key() {
+    // Unique key in one strategy
+    if (this._key) {
+      return this._key;
+    }
+
+    if (this.isOption) {
+      this._key = this.c + " " + this.exp + " " + this.stk + this.cepe;
+    } else {
+      this._key = this.c + " " + this.exp;
+    }
+
+    return this._key;
+  }
+
+
+  // Straight forward data
+
+  get id() {
+    // Unique for one user across all strategies (timestamp)
+    return this._id;
+  }
+
+  set id(val) {
+    // set during load from DB
+    this._id = val;
   }
 
   get isOption() {
-    return this._opt;
+    return this._isOpt;
   }
 
   get isFuture() {
-    return !this._opt;
+    return !this.isOption;
   }
 
   get a() {
@@ -693,66 +840,67 @@ class StrategyLeg {
     return this._cp;
   }
 
-  get timestamp() {
-    return this._tm.getTime();
+  get isBuy() {
+    return this._buy;
   }
 
-  set timestamp(val) {
+  get isSell() {
+    return !this.isBuy;
+  }
+
+  get isOpen() {
+    return this.lots > 0 ? true : false;
+  }
+
+  get isClosed() {
+    return !this.isOpen;
+  }
+
+  get entryPrice() {
+    return this._prc;
+  }
+
+  set entryPrice(val) {
+    this._prc = val;
+  }
+
+  get curPrice() {
+    return this._curPrc;
+  }
+
+  set curPrice(val) {
+    this._curPrc = val;
+    this.updatedNow();
+  }
+
+  get lots() {
+    return this._q;
+  }
+
+  set lots(val) {
+    this._q = val;
+  }
+
+  get tqty() {
+    return this._q * LOT_SIZE[this._c];
+  }
+
+  get lastUpdateTime() {
+    // epoch time in msec
+    return this._lastUpdTm.getTime();
+  }
+
+  set lastUpdateTime(val) {
+    // val can be null/0, epoch time in msec
     if (!val) {
-      this._tm = new Date();
+      this._lastUpdTm = new Date();
     } else {
-      this._tm = new Date(val);
+      this._lastUpdTm = new Date(val);
     }
   }
 
-  calcEarnings(newPrc) {    // New Price at which we do the opposite transaction
-    let newValue = this.isBuy ? (-this.tqty * newPrc) : this.tqty * newPrc;
-
-    return this.value - newValue;
-  }
-
-  matches(leg) {
-    // Returns true if this matches leg based on option/future attributes (not bs/qty/prc)
-    if (this.a === leg.a && this.b === leg.b && this.c === leg.c &&
-      this.exp === leg.exp && this.stk === leg.stk && this.cepe == leg.cepe) {
-      return true;
-    }
-
-    return false;
-  }
-
-  settleWith(leg) {
-    // Returns true if settlement done else false (no change made)
-    if (this.isClosed) {
-      return false;
-    }
-
-    if (this.matches(leg) && this.isBuy !== leg.isBuy) {
-      this._stllegs.push(leg);
-      if (this.lots === leg.lots) {
-        this._open = false;
-      }
-    } else {
-      return false;
-    }
-  }
-
-  async fetchNCalcEarnings(tmstmp = Date.now()) {
-    let resp = await this.getRecord(tmstmp);
-    let rec = new Record(resp[0]);
-    this.curPrice = rec.ltp;
-    return this.calcEarnings(rec.ltp);
-  }
-
-  async getRecord(tmstmp=Date.now(), endtm = null) {    // Javascript uses msec precision
-    // Round the timestamps to minute boundary.
-    if (endtm) {
-      return DBFacade.fetchRecs(this.a, this.b, this.c, this.exp,
-        null, [this.stk], [this.cepe], [Math.floor(tmstmp / 60000) * 60], [Math.floor(endtm / 60000) * 60]);
-    } else {
-      return DBFacade.fetchRecs(this._a, this._b, this.c, this.exp,
-        [Math.floor(tmstmp / 60000) * 60], [this.stk], [this.cepe], null, null);
-    }
+  updatedNow() {
+    this._lastUpdTm = Date.now();
   }
 }
 
@@ -786,6 +934,16 @@ class RecordList {
     return this._raw;
   }
 
+  get one() {
+    if (this.count == 0) {
+      throw new ResError(ResErrorCode.NO_DATA, "No records fetched");
+    } else if (this.count > 1) {
+      throw new ResError(ResErrorCode.MULT_DATA, "More than 1 records fetched");
+    }
+
+    return this._raw[0];
+  }
+
   get objects() {
     return this._todrecs;
   }
@@ -794,24 +952,35 @@ class RecordList {
     return Array.from(this._todrecs.keys()).sort();
   }
 
+  get count() {
+    if (this._raw) {
+      return this._raw.length;
+    } else {
+      return 0;
+    }
+  }
+
   process(recs) {
     this._raw = recs;
-    this._todrecs = new Map();    // ts -> rec
-    if (this.sym.isOption) {
-      for (let i = 0; i < recs.length; i++) {
-        let chain = this._todrecs.get(recs[i].tod);
-        if (chain) {
-          chain.add(recs[i]);
-        } else {
-          chain = new OptionChain(this.sym);
-          chain.tod = recs[i].tod;
-          chain.add(recs[i]);
-          this._todrecs.set(recs[i].tod, chain);
+
+    if (recs.length > 1) {
+      this._todrecs = new Map();    // ts -> chain
+      if (this.sym.isOption) {
+        for (let i = 0; i < recs.length; i++) {
+          let chain = this._todrecs.get(recs[i].tod);
+          if (chain) {
+            chain.add(recs[i]);
+          } else {
+            chain = new OptionChain(this.sym);
+            chain.tod = recs[i].tod;
+            chain.add(recs[i]);
+            this._todrecs.set(recs[i].tod, chain);
+          }
         }
-      }
-    } else {
-      for (let i = 0; i < recs.length; i++) {
-        this._todrecs.set(recs[i].tod, recs[i]);
+      } else {
+        for (let i = 0; i < recs.length; i++) {
+          this._todrecs.set(recs[i].tod, recs[i]);
+        }
       }
     }
   }
@@ -857,7 +1026,7 @@ class OptionChain {
 }
 
 class RecordPair {
-  constructor(ce=null, pe=null) {
+  constructor(ce = null, pe = null) {
     this._ce = ce;
     this._pe = pe;
   }
@@ -902,7 +1071,13 @@ class Record {
     if (typeof (rec) === "string") {
       rec = JSON.parse(rec);
     }
-    
+
+    this._tod = null;
+    this._exp = null;
+    this._stk = null;
+    this._opt = null;
+    this._frms = null;
+
     this.rec = rec;
     this.parse();
   }
@@ -915,6 +1090,14 @@ class Record {
     return this._tod;
   }
 
+  get exp() {
+    return this._exp;
+  }
+
+  set exp(val) {
+    this._exp = val;
+  }
+
   get stk() {
     return this._stk;
   }
@@ -924,23 +1107,43 @@ class Record {
   }
 
   get O() {
-    return this.rec.h[0];
+    if (this.rec.h) {
+      return parseFloat(this.rec.h[0]);
+    }
+
+    return null;
   }
 
   get H() {
-    return this.rec.h[1];
+    if (this.rec.h) {
+      return parseFloat(this.rec.h[1]);
+    }
+
+    return null;
   }
 
   get L() {
-    return this.rec.h[2];
+    if (this.rec.h) {
+      return parseFloat(this.rec.h[2]);
+    }
+
+    return null;
   }
 
   get C() {
-    return this.rec.h[3];
+    if (this.rec.h) {
+      return parseFloat(this.rec.h[3]);
+    }
+
+    return null;
   }
 
   get V() {
-    return this.rec.h[4];
+    if (this.rec.h) {
+      return parseInt(this.rec.h[4]);
+    }
+
+    return null;
   }
 
   get ltp() {
@@ -951,11 +1154,25 @@ class Record {
         prc = frms[i].p;
       }
     }
+
     if (!prc && this.O) {
       prc = (this.O + this.H + this.L + this.C) / 4;
+      prc = prc.toFixed(2);
     }
 
     return prc;
+  }
+
+  get oi() {
+    let oi = null;
+    let frms = this.fs;
+    if (frms) {
+      for (let i = 0; i < frms.length && frms[i].o; i++) {
+        oi = frms[i].o;
+      }
+    }
+
+    return oi;
   }
 
   get fs() {
@@ -971,6 +1188,8 @@ class Record {
 
       return res;
     }
+
+    return null;
   }
 
   parse() {
@@ -1015,23 +1234,43 @@ class Frame {
   }
 
   get O() {
-    return this.frm.h[0];
+    if (this.frm.h) {
+      return this.frm.h[0];
+    }
+
+    return null;
   }
 
   get H() {
-    return this.frm.h[1];
+    if (this.frm.h) {
+      return this.frm.h[1];
+    }
+
+    return null;
   }
 
   get L() {
-    return this.frm.h[2];
+    if (this.frm.h) {
+      return this.frm.h[2];
+    }
+
+    return null;
   }
 
   get C() {
-    return this.frm.h[3];
+    if (this.frm.h) {
+      return this.frm.h[3];
+    }
+
+    return null;
   }
 
   get V() {
-    return this.frm.h[4];
+    if (this.frm.h) {
+      return this.frm.h[4];
+    }
+
+    return null;
   }
 }
 
@@ -1100,7 +1339,7 @@ class SymbolLeaf {
   }
 
   setDays(exp, val) {
-    if (exp === null || exp == undefined) {
+    if (exp === null || exp === undefined) {
       this._days = val;
     } else {
       this._expDays.set(exp, val);
@@ -1109,8 +1348,7 @@ class SymbolLeaf {
 
   getAutocompleteList() {
     let fullList = [];
-    //console.log(this.key);
-    //console.log(this.expiries);
+
     if (this.expiries) {
       for (let i = 0; i < this.expiries.length; i++) {
         let exp = this.expiries[i];
@@ -1118,7 +1356,7 @@ class SymbolLeaf {
         if (this.getStrikes(this.expiries[i])) {
           let stks = this.getStrikes(this.expiries[i]);
           for (let j = 0; j < stks.length; j++) {
-            let key = this.c + " " + exp + " " + stks[i];
+            let key = this.c + " " + exp + " " + stks[j];
             fullList.push(key + " CE");
             fullList.push(key + " PE");
           }
@@ -1177,12 +1415,13 @@ class SymbolList {
       for (let leaf of leaves) {
         let alist = leaf.getAutocompleteList();
         if (alist.length > 0) {
-          fullList.concat(alist);
+          fullList = fullList.concat(alist);
         }
       }
     }
 
-    return new Set(fullList.sort());
+    return fullList;
+    //return new Set(fullList.sort());
   }
 
   load(tree) {
@@ -1196,7 +1435,7 @@ class SymbolList {
             this.bMap.get(a).add(b);
           }
           if (this.cMap.get(a + b) === undefined) {
-            this.cMap.set( a + b, new Set().add(new SymbolLeaf(a, b, tree[a][b][i])) );
+            this.cMap.set(a + b, new Set().add(new SymbolLeaf(a, b, tree[a][b][i])));
           } else {
             this.cMap.get(a + b).add(new SymbolLeaf(a, b, tree[a][b][i]));
           }
@@ -1209,7 +1448,7 @@ class SymbolList {
 class DateRange {
   constructor(start, end = null) {
     if (!start) {
-      throw Error("Undefined start date in DateRange");
+      throw new Error("Undefined start date in DateRange");
     }
 
     //console.log("Input S [" + start + "] E [" + end + "]");
@@ -1226,7 +1465,7 @@ class DateRange {
         if (len <= 10) {   // time in seconds
           num = num * 1000;
         }
-        
+
         this._start = new Date(num);
       }
     }
@@ -1246,7 +1485,7 @@ class DateRange {
           }
 
           this._end = new Date(num);
-        } 
+        }
       }
 
       if (this._start.getTime() > this._end.getTime()) {
@@ -1269,7 +1508,7 @@ class DateRange {
     // Date/Number -> "other" within "this" range
 
     if (!this.isRange) {
-      if (typeof(dttm) === 'number' || typeof(dttm) === 'string') {
+      if (typeof (dttm) === 'number' || typeof (dttm) === 'string') {
         return this.startMSec === new DateRange(dttm).startMSec;
       } else if (dttm instanceof DateRange) {
         if (dttm.isRange) {
@@ -1363,12 +1602,12 @@ class DateRange {
       // Convert a non-range into a range of durationMins
       endMSec = newStart;
     }
-    
+
     if (alignStart) {
       let rem = newStart % durMSec;
       newStart -= rem;
     }
-    
+
     for (; newStart <= endMSec; newStart += durMSec) {
       // new range end is 1 msec behind to ensure no over-lapping with the next range
       newRanges.push(new DateRange(newStart, newStart + durMSec - 1));
@@ -1531,9 +1770,9 @@ class DBRequest {
 
   set reqDts(val) {
     if (Array.isArray(val)) {
-      this._dts = val.map(function (value) { return new DateRange(value); } );
+      this._dts = val.map(function (value) { return new DateRange(value); });
     } else {
-      this._dts = [ new DateRange(val) ];
+      this._dts = [new DateRange(val)];
     }
   }
 
@@ -1581,7 +1820,7 @@ class DBRequest {
     // Returns DBRequestList
 
     let reqs = new DBRequestList();
-    
+
     if (intervalMins > 0) {
       let dtRanges = null;
       if (this.reqDts) {
@@ -1626,7 +1865,7 @@ class DBRequest {
     }
 
     let reqs = new DBRequestList();
-    
+
     for (let j = 0; j < this.cepe.length; j++) {
       for (let k = 0; k < this.stks.length; k++) {
         let newreq = this._copy();
@@ -1658,12 +1897,12 @@ class DBRequest {
 
     let matched = false;
 
-    if (this.stks) {
+    if (this.forOption && this.stks) {
       matched = this.stks.find(val => val === record.stk) ? true : false;
       if (!matched) { return matched; }
     }
 
-    if (this.cepe) {
+    if (this.forOption && this.cepe) {
       matched = this.cepe.find(val => val === record.opt) ? true : false;
       if (!matched) { return matched; }
     }
@@ -1684,7 +1923,7 @@ class DBOps {
 
   constructor(name) {
     this.name = name;
-    this.db = new PouchDB(name, {revs_limit:5});
+    this.db = new PouchDB(name, { revs_limit: 5 });
   }
 
   async destroy() {
@@ -1724,10 +1963,10 @@ class DBOps {
     if (pre) {
       // Pre-check whether record already exists
       if (doc._id) {
-        const dbrec = null;
+        let dbrec = null;
         try {
           dbrec = await this.db.get(doc._id);
-        } catch (err) {}  // Ignore error, document need not exist in the db
+        } catch (err) { }  // Ignore error, document need not exist in the db
         if (dbrec) {
           console.log("document [" + doc._id + "] exists in DB [" + this.name + "], updating _rev [" + dbrec._rev + "]");
           doc["_rev"] = dbrec._rev;
@@ -1997,7 +2236,7 @@ class DataDB {
         result.error = new DBError("Unable to merge [" + dbDoc._id + "]");
         return result;
       }
-    } 
+    }
 
     return dbres;
   }
@@ -2141,17 +2380,136 @@ class IndexDB extends DataDB {
 class ListsDB {
   constructor() {
     this.db_name = "lists";
-    this.db = new DBOps(this.db_name);
+    this.db = new PouchDB(this.db_name, { revs_limit: 5 });
   }
 
-  async save(doc) {
+  async fetchSyms() {
+    let doc = await this.get("symbols");
+    return doc["data"];
+  }
 
+  async fetchExpiries(sym) {
+    let doc = await this.get(sym.key + "_exp");
+    return doc["data"];
+  }
+
+  async fetchStrikes(sym, d) {
+    let doc = await this.get(sym.key + "_" + d + "_stk");
+    return doc["data"];
+  }
+
+  async fetchDays(sym, d = null) {
+    let doc = null;
+    if (d) {
+      doc = await this.get(sym.key + "_" + d + "_day");
+    } else {
+      doc = await this.get(sym.key + "_day");
+    }
+
+    return doc["data"];
+  }
+
+  async fetchDBs(fullDoc = false) {
+    let doc = await this.get("DBLIST");
+    if (doc) {
+      if (fullDoc) {
+        return doc;
+      }
+      return doc["data"];
+    }
+
+    return null;
+  }
+
+  async saveSyms(syms) {
+    await this.save("symbols", syms, true);  // Do a pre-check, update rev and save
+  }
+
+  async saveExpiries(sym, exps) {
+    await this.save(sym.key + "_exp", exps, true);
+  }
+
+  async saveStrikes(sym, d, stks) {
+    await this.save(sym.key + "_" + d + "_stk", stks, true);
+  }
+
+  async saveDays(sym, days, d = null) {
+    if (d) {
+      await this.save(sym.key + "_" + d + "_day", days, true);
+    } else {
+      await this.save(sym.key + "_day", days, true);
+    }
+  }
+
+  async addDBs(name) {
+    if (name) {
+      await this.save("DBLIST", name, true, true);
+    }
+  }
+
+  async remDB(name) {
+    let dbs = this.fetchDBs();
+    let idx = dbx.indexOf(name);
+    if (idx != -1) {
+      dbs.splice(idx, 1);
+      await this.save("DBLIST", dbs, true)
+    }
+  }
+
+  async get(id) {
+    return await this.db.get(id);
+  }
+
+  async save(id, data, pre = false, append = false) {
+    // append works only with pre and array doc.data
+    let doc = {};
+    let dbrec = null;
+
+    if (pre) {
+      // Pre-check whether record already exists
+      if (id) {
+        try {
+          dbrec = await this.db.get(id);
+          //console.log(dbrec);
+        } catch (err) {
+          // Ignore error, document need not exist in the db
+          console.log("Doc [" + id + "] not found [" + err + "] in DB [" + this.db_name + "]");
+        }
+
+        if (dbrec) {
+          console.log("document [" + id + "] exists in DB [" + this.db_name + "], updating _rev [" + dbrec._rev + "]");
+          doc._rev = dbrec._rev;
+        }
+      }
+    }
+
+    doc._id = id;
+    doc["tm"] = Date.now();
+    if (dbrec && append) {
+      if (Array.isArray(data)) {
+        doc["data"] = dbrec["data"].concat(data);
+      } else {
+        dbrec["data"].push(data);
+        doc["data"] = dbrec["data"];
+      }
+    } else {
+      doc["data"] = data;
+    }
+
+    await this.db.put(doc);
+  }
+
+  async delete(doc) {
+    if (doc._deleted === undefined || doc._deleted === null) {
+      doc._deleted = true;
+    }
+
+    await this.save(doc, true);
   }
 }
 
 class DBFactory {
   constructor() {
-
   }
 
   static create(dbreq) {
@@ -2163,6 +2521,66 @@ class DBFactory {
       return new IndexDB(dbreq);
     } else {
       throw new DBError("Unknown DB Type");
+    }
+  }
+}
+
+class DBManager {
+  constructor() {
+    this.listsDB = new ListsDB();
+    this.registerEvents();
+    this.registerListsDB();
+  }
+
+  registerEvents() {
+    PouchDB.on('created', dbname => function (dbname) {
+      console.log("Created DB [" + dbname + "]");
+      this.listsDB.addDBs(dbname);
+    });
+
+    PouchDB.on('destroyed', function (dbname) {
+      console.log("Destroyed DB [" + dbname + "]");
+    });
+  }
+
+  async registerListsDB() {
+    let dbs = null;
+    try {
+      dbs = await this.listsDB.fetchDBs();
+    } catch (err) {
+    }
+
+    if (!(dbs && dbs.includes(this.listsDB.db_name))) {
+      dbs = [this.listsDB.db_name];
+      this.listsDB.addDBs(dbs);
+    }
+  }
+
+  getListsDB() {
+    return this.listsDB;
+  }
+
+  async fetchDBs() {
+    return await this.listsDB.fetchDBs();
+  }
+
+  async info(db_name) {
+    let db = new PouchDB(db_name);
+    await db.get("DBLIST");
+    return await db.info();
+  }
+
+  async _remDB(db_name) {
+    let db = new PouchDB(db_name);
+    db.destroy();
+    this.listsDB.remDB(db_name);
+  }
+
+  async removeDB(db_name) {
+    if (Array.isArray(db_name)) {
+      db_name.forEach(this._remDB);
+    } else {
+      this._remDB(db_name);
     }
   }
 }
@@ -2213,7 +2631,7 @@ class DBFacade {
     // Returns a list of DBResults
     let totCount = dbreq.expectedCount;
     console.log("Exp [" + totCount + "]");
-    if (totCount > 200) {
+    if (totCount > 300) {
       throw new DBError("Too many records requested, please reduce the query size");
     }
 
@@ -2258,7 +2676,9 @@ class DBFacade {
     let okResults = new DBResultList();
     for (let k = 0; k < results.length; k++) {
       if (results.list[k].ok) {
-        if (dbreq.match(results.list[k].record)) {
+        let record = results.list[k].record;
+        if (dbreq.match(record)) {
+          record.exp = dbreq.exp;
           okResults.push(results.list[k]);
         }
       }
@@ -2284,9 +2704,18 @@ class DBFacade {
   }
 
   static async fetchLists(sym = null, d = null) {
+
     if (sym === null) {
-      let response = await Fetcher.getXTM();
-      DBFacade.symList = new SymbolList(response.data()[0]);
+      let data = null;
+      try {
+        data = await DBFacade.listsDB.fetchSyms();
+      } catch (err) {
+        let response = await Fetcher.getXTM();
+        data = response.data()[0];
+        DBFacade.listsDB.saveSyms(data);
+      }
+
+      DBFacade.symList = new SymbolList(data);
       return DBFacade.symList;
     }
 
@@ -2294,15 +2723,32 @@ class DBFacade {
       if (sym.expiries === null || sym.expiries === undefined) {
         if (sym.b === "INDEX") {
           if (sym.getDays() === null || sym.getDays() === undefined) {
-            let response = await Fetcher.getDays(sym.a, sym.b, sym.c);
-            sym.setDays(response.data().sort());
+            let data = null;
+            try {
+              data = await DBFacade.listsDB.fetchDays(sym);
+            } catch (err) {
+              let response = await Fetcher.getDays(sym.a, sym.b, sym.c);
+              data = response.data().sort();
+              DBFacade.listsDB.saveDays(sym, data);
+            }
+            sym.setDays(null, data);    // No expiry date for indexes
           }
 
           return { days: sym.getDays() };
         }
 
-        let response = await Fetcher.getExpiries(sym.a, sym.b, sym.c);
-        sym.expiries = response.data().sort();
+
+
+        let data = null;
+        try {
+          data = await DBFacade.listsDB.fetchExpiries(sym);
+        } catch (err) {
+          let response = await Fetcher.getExpiries(sym.a, sym.b, sym.c);
+          data = response.data().sort();
+          DBFacade.listsDB.saveExpiries(sym, data);
+        }
+
+        sym.expiries = data;
       }
 
       return { exps: sym.expiries };
@@ -2310,17 +2756,35 @@ class DBFacade {
 
     if (sym.getStrikes(d) === null || sym.getStrikes(d) === undefined) {
       if (sym.b === "OPTIONS") {
-        let response = await Fetcher.getStrikes(sym.a, sym.b, sym.c, d);
-        sym.setStrikes(d, response.data().sort(function (a, b) { return a - b }));
+        let data = null;
+        try {
+          data = await DBFacade.listsDB.fetchStrikes(sym, d);
+        } catch (err) {
+          let response = await Fetcher.getStrikes(sym.a, sym.b, sym.c, d);
+          data = response.data().sort(function (a, b) { return a - b });
+          DBFacade.listsDB.saveStrikes(sym, d, data);
+        }
+
+        sym.setStrikes(d, data);
       }
 
       if (sym.getDays(d) === null || sym.getDays(d) === undefined) {
-        let response = await Fetcher.getDays(sym.a, sym.b, sym.c, d);
-        sym.setDays(d, response.data().sort());
+        let data = null;
+        try {
+          data = await DBFacade.listsDB.fetchDays(sym, d);
+        } catch (err) {
+          let response = await Fetcher.getDays(sym.a, sym.b, sym.c, d);
+          data = response.data().sort();
+          DBFacade.listsDB.saveDays(sym, data, d);
+        }
+        sym.setDays(d, data);
       }
     }
 
     return { stks: sym.getStrikes(d), days: sym.getDays(d) };
   }
 }
+
+dbmgr = new DBManager();
 DBFacade.symList = null;
+DBFacade.listsDB = dbmgr.getListsDB();
