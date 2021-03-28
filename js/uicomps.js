@@ -329,20 +329,100 @@ class ResDataSelector {
   }
 }
 
-class StrategyCard {
-  constructor(cardTemplate, editorTemplate) {
-    this.valueCardHTML = '<div class="col" id="stgySTG_ID"> <div class="card shadow-sm"><div class="card-header"><div>STG_NAME<a class="bi-trash text-danger float-end" href="#" aria-label="Remove"></a> <a class="bi-pencil-square text-primary float-end me-2" href="#" aria-label="Edit"></a> </div> </div> <div class="card-body text-center"> BODY_DATA </div> <div class="card-footer text-muted"><small>FOOTER_DATA</small> </div> </div> </div>';
+class StrategyCardRenderer {
+
+  constructor(cardTemplate=null, editorTemplate=null) {
+    if (StrategyCardRenderer.instance) {
+      return StrategyCardRenderer.instance;
+    }
+
+    // These all members are not used any more.
+    this.valueCardHTML = `
+    <div class="col mb-3" id="STG_ID"> 
+      <div class="card shadow-sm">
+        <div class="card-header">
+          <div>STG_NAME
+            <a class="bi-trash text-danger float-end" href="#" 
+              onclick="deleteStrategy(\'STG_ID\')" aria-label="Remove"></a> 
+            <a class="bi-pencil-square text-primary float-end me-2" href="#" aria-label="Edit" 
+              onclick="editStrategy(\'STG_ID\')"></a> 
+          </div>
+        </div> 
+        <div class="card-body text-center"> BODY_DATA </div> 
+        <div class="card-footer text-muted"> <small>FOOTER_DATA</small> </div> 
+      </div> 
+    </div>`;
 
     if (cardTemplate) {
       //let temp = document.getElementById(cardTemplate);
       //this.valueCardHTML = temp.innerHTML;
     }
 
-    this.valueBodySuccess = '<h5 class="card-title text-success">STG_VALUE</h5> <span>STG_LEGS Legs</span>';
-
-    this.valueBodyDanger = '<h5 class="card-title text-danger">STG_VALUE</h5> <span>STG_LEGS Legs</span>';
-
-    this.fullCardHTML = '<div class="col"><div class="card text-center mb-3" id="stgySTG_ID"> <div class="card-header"> <div class="d-flex"> <div class="me-auto align-self-center"> <span>STG_NAME</span></div> <ul class="nav nav-pills" role="tablist"> <li class="nav-item" role="presentation"> <a href="#" class="nav-link active" id="legs-tabSTG_ID" data-bs-toggle="pill" data-bs-target="#legsSTG_ID" type="button" role="tab" aria-controls="legs" aria-selected="true">Legs</a></li> <li class="nav-item" role="presentation"> <a href="#" class="nav-link" id="greeks-tabSTG_ID" data-bs-toggle="pill" data-bs-target="#greeksSTG_ID" type="button" role="tab" aria-controls="greeks" aria-selected="false">Greeks</a> </li> <li class="nav-item" role="presentation"> <a href="#" class="nav-link disabled" id="other-tabSTG_ID" data-bs-toggle="pill" data-bs-target="#otherSTG_ID" type="button" role="tab" aria-controls="other" aria-selected="false" tabindex="-1" aria-disabled="true">Disabled</a> </li> </ul> </div> </div> <div class="card-body tab-content"> <div class="tab-pane fade show active" id="legsSTG_ID" role="tabpanel" aria-labelledby="legs-tabSTG_ID"> <div class="table-responsive"> <table class="table caption-top table-sm"> <thead><tr> <th scope="col">#</th> <th scope="col">Instrument</th> <th scope="col">B/S</th> <th scope="col">Qty</th> <th scope="col">Entry Price</th> <th scope="col">Current Price</th> <th scope="col">Live P&L</th> <th scope="col">Exit Price</th> <th scope="col">P&L</th> <th scope="col"> </th>  </tr></thead> <tbody>STG_LEGS</tbody> <tfoot> STG_FOOTER </tfoot> </table> </div> </div> <div class="tab-pane fade" id="greeksSTG_ID" role="tabpanel" aria-labelledby="greeks-tabSTG_ID"> Greeks </div>  <div class="tab-pane fade" id="otherSTG_ID" role="tabpanel" aria-labelledby="other-tabSTG_ID"> Other </div> </div> <div class="card-footer text-muted"> <small>FOOTER_DATA</small> <i class="me-2 bi-save-fill text-success float-end"></i></div> </div></div>';
+    this.fullCardHTML = `
+    <div class="col">
+      <div class="card text-center mb-3" id="STG_ID"> 
+        <div class="card-header"> 
+          <div class="d-flex"> 
+            <div class="me-auto align-self-center"> 
+              <span>STG_NAME</span>
+            </div> 
+            <ul class="nav nav-pills" role="tablist"> 
+              <li class="nav-item" role="presentation"> 
+                <a href="#" class="nav-link active" id="legs-tabSTG_ID" data-bs-toggle="pill" 
+                  data-bs-target="#legsSTG_ID" type="button" role="tab" aria-controls="legs" 
+                  aria-selected="true">Legs</a>
+              </li> 
+              <li class="nav-item" role="presentation"> 
+              <a href="#" class="nav-link" id="greeks-tabSTG_ID" data-bs-toggle="pill" 
+                data-bs-target="#greeksSTG_ID" type="button" role="tab" aria-controls="greeks" 
+                aria-selected="false">Greeks</a> 
+              </li> 
+              <li class="nav-item" role="presentation"> 
+                <a href="#" class="nav-link disabled" id="other-tabSTG_ID" data-bs-toggle="pill" 
+                  data-bs-target="#otherSTG_ID" type="button" role="tab" aria-controls="other" 
+                  aria-selected="false" tabindex="-1" aria-disabled="true">Disabled</a> 
+              </li> 
+            </ul> 
+          </div> 
+        </div> 
+        <div class="card-body tab-content"> 
+          <div class="tab-pane fade show active" id="legsSTG_ID" role="tabpanel" 
+            aria-labelledby="legs-tabSTG_ID"> 
+            <div class="table-responsive"> 
+              <table class="table caption-top table-sm"> 
+                <thead>
+                  <tr> 
+                    <th scope="col">#</th> 
+                    <th scope="col">Instrument</th> 
+                    <th scope="col">B/S</th> 
+                    <th scope="col">Qty</th> 
+                    <th scope="col">Entry Price</th> 
+                    <th scope="col">Current Price</th> 
+                    <th scope="col">Live P&L</th> 
+                    <th scope="col">Exit Price</th> 
+                    <th scope="col">P&L</th> 
+                    <th scope="col"> </th>  
+                  </tr>
+                </thead> 
+                <tbody>STG_LEGS</tbody> 
+                <tfoot> STG_FOOTER </tfoot> 
+              </table> 
+            </div> 
+          </div> 
+          <div class="tab-pane fade" id="greeksSTG_ID" role="tabpanel" 
+            aria-labelledby="greeks-tabSTG_ID"> Greeks </div>  
+          <div class="tab-pane fade" id="otherSTG_ID" role="tabpanel" 
+            aria-labelledby="other-tabSTG_ID"> Other </div> 
+        </div> 
+        <div class="card-footer text-muted"> 
+          <small>FOOTER_DATA</small> 
+          <a href="#" class="me-2 bi-save-fill text-success float-end" 
+            onclick="saveStrategy(\'STG_ID\')"></a> 
+          <a href="#" class="me-2 bi-trash text-danger float-end" 
+            onclick="deleteStrategy(\'STG_ID\')"></a> 
+        </div>
+      </div>
+    </div>`;
 
     if (editorTemplate) {
       //let temp = document.getElementById(editorTemplate);
@@ -350,73 +430,536 @@ class StrategyCard {
     }
   }
   
-  getValueCard(stg, value) {
-    // This method is called as resolver for the Strategy.updateEarnings()
-    let html = this.valueCardHTML.replaceAll("STG_ID", stg.id);
-    html = html.replace("STG_NAME", stg.name);
-    let body = null;
-    if (value >= 0) {
-      body = this.valueBodySuccess.replace("STG_VALUE", value);
-    } else {
-      body = this.valueBodyDanger.replace("STG_VALUE", value);
+  static getInstance() {
+    if (!StrategyCardRenderer.instance) {
+      StrategyCardRenderer.instance = new StrategyCardRenderer();
     }
-    body = body.replace("STG_LEGS", stg.count.toString());
 
-    html = html.replace("BODY_DATA", body);
-    html = html.replace("FOOTER_DATA", "Created: " + new Date(stg.time).toLocaleString());
+    return StrategyCardRenderer.instance;
+  }
+
+  getValueCard(stg) {
+    // Raises delstg and edtstg events
+    if (!stg) {
+      return "";
+    }
+    
+    let value = stg.curValue.toFixed(2);
+
+    let html = `
+    <div class="col mb-3" id="${stg.id}"> 
+      <div class="card shadow-sm">
+        <div class="card-header">
+          <div>${stg.name}
+            <a class="bi-trash text-danger float-end" href="#/" 
+              onclick="this.dispatchEvent(new CustomEvent('delstg', {
+                bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
+              }))" aria-label="Remove"></a> 
+            <a class="bi-pencil-square text-${stg.isinFullView ? "danger" : "primary"} float-end me-2" href="#/" aria-label="Edit" 
+              onclick="this.dispatchEvent(new CustomEvent('edtstg', {
+                bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
+              }))"></a> 
+          </div>
+        </div> 
+        <div class="card-body text-center">
+          <h5 class="card-title text-${value >= 0 ? "success" : "danger"}">${value}</h5>
+          <span>${stg.count.toString()} Legs</span>
+        </div> 
+        <div class="card-footer text-muted"> 
+          <small> Created: ${new Date(stg.createTime).toLocaleString()}</small> 
+        </div> 
+      </div> 
+    </div>`;
 
     return html;
   }
 
   getFullCard(stg) {
-    let fullCard = this.fullCardHTML.replaceAll("STG_ID", stg.id);
-    fullCard = fullCard.replace("STG_NAME", stg.name);
+    // // Raises savstg, delleg and delstg events
+    if (!stg) {
+      return "";
+    }
 
-    let allLegs = '';
+    let allLegs = "";
     for (let i = 0; i < stg.legs.length; i++) {
       let leg = stg.legs[i];
-      let row = '<tr><th scope="row">' + (i + 1).toString();
-      row += '</th><td>' + leg.key;
 
-      if (leg.isBuy) {
-        row += '</td><td>Buy</td><td>';
-        row += leg.tqty.toString();
-      } else {
-        row += '</td><td>Sell</td><td>';
-        row += (-leg.tqty).toString();
-      }
-      
-      row += '</td><td>' + leg.entryPrice.toString();
-      row += '</td><td>' + leg.curPrice.toString();
-      if (leg.curPosition >= 0) {
-        row += '</td><td class="text-success">' + leg.curPosition.toString();
-      } else {
-        row += '</td><td class="text-danger">' + (leg.curPosition).toString();
-      }
-      row += '</td><td></td><td></td><td><a class="bi-trash text-danger" href="#" aria-label="Remove"></a></td></tr>';  // Exit Price and P&L not yet done
+      let row = `<tr>
+      <th scope="row">${(i + 1).toString()}</th>
+      <td> ${leg.key}</td>
+      <td>${leg.isBuy ? "Buy" : "Sell"}</td>
+      <td>${leg.isBuy ? "" : "-"}${leg.tqty.toString()}</td>
+      <td>${leg.entryPrice.toFixed(2)}</td>
+      <td>${leg.curPrice.toFixed(2)}</td>
+      <td class=${leg.curPosition >= 0 ? "text-success" : "text-danger"}>${leg.curPosition.toFixed(2)}</td>
+      <td></td>
+      <td></td>
+      <td>
+        <a class="bi-trash text-danger" href="#/" aria-label="Remove" 
+          onclick="this.dispatchEvent(new CustomEvent('delleg', {
+            bubbles: true, calcelable: true, detail: { stg: '${stg.id}', leg: '${leg.id}' } 
+          }))"></a>
+      </td>
+      </tr>
+      `;
 
       allLegs += row;
     }
 
-    fullCard = fullCard.replace("STG_LEGS", allLegs);
+    let footer = `<tr> 
+    <td></td> 
+    <td></td> 
+    <td></td> 
+    <td></td> 
+    <td></td> 
+    <td></td> 
+    <td>0</td> 
+    <td></td> 
+    <td>0</td> 
+    </tr>`;
 
-    let footer = '<tr> <td></td> <td></td> <td></td> <td></td> <td></td> <td></td> <td>0</td> <td></td> <td>0</td> </tr>';
+    let fullCardHTML = `
+      <div class="card text-center mb-3" id="${stg.id}"> 
+        <div class="card-header"> 
+          <div class="d-flex"> 
+            <div class="me-auto align-self-center"> 
+              <span>${stg.name}</span>
+            </div> 
+            <ul class="nav nav-pills" role="tablist"> 
+              <li class="nav-item" role="presentation"> 
+                <a href="#" class="nav-link active" id="legs-tab${stg.id}" data-bs-toggle="pill" 
+                  data-bs-target="#legs${stg.id}" type="button" role="tab" aria-controls="legs" 
+                  aria-selected="true">Legs</a>
+              </li> 
+              <li class="nav-item" role="presentation"> 
+              <a href="#" class="nav-link" id="greeks-tab${stg.id}" data-bs-toggle="pill" 
+                data-bs-target="#greeks${stg.id}" type="button" role="tab" aria-controls="greeks" 
+                aria-selected="false">Greeks</a> 
+              </li> 
+              <li class="nav-item" role="presentation"> 
+                <a href="#" class="nav-link disabled" id="other-tab${stg.id}" data-bs-toggle="pill" 
+                  data-bs-target="#other${stg.id}" type="button" role="tab" aria-controls="other" 
+                  aria-selected="false" tabindex="-1" aria-disabled="true">Disabled</a> 
+              </li> 
+            </ul> 
+          </div> 
+        </div> 
+        <div class="card-body tab-content"> 
+          <div class="tab-pane fade show active" id="legs${stg.id}" role="tabpanel" 
+            aria-labelledby="legs-tab${stg.id}"> 
+            <div class="table-responsive"> 
+              <table class="table caption-top table-sm"> 
+                <thead>
+                  <tr> 
+                    <th scope="col">#</th> 
+                    <th scope="col">Instrument</th> 
+                    <th scope="col">B/S</th> 
+                    <th scope="col">Qty</th> 
+                    <th scope="col">Entry Price</th> 
+                    <th scope="col">Current Price</th> 
+                    <th scope="col">Live P&L</th> 
+                    <th scope="col">Exit Price</th> 
+                    <th scope="col">P&L</th> 
+                    <th scope="col"> </th>  
+                  </tr>
+                </thead> 
+                <tbody>${allLegs}</tbody> 
+                <tfoot> ${footer} </tfoot> 
+              </table> 
+            </div> 
+          </div> 
+          <div class="tab-pane fade" id="greeks${stg.id}" role="tabpanel" 
+            aria-labelledby="greeks-tab${stg.id}"> Greeks </div>  
+          <div class="tab-pane fade" id="other${stg.id}" role="tabpanel" 
+            aria-labelledby="other-tab${stg.id}"> Other </div> 
+        </div> 
+        <div class="card-footer text-muted"> 
+          <small>Created On: ${new Date(stg.createTime).toLocaleString()}</small> 
+          <a href="#/" class="me-2 bi-save-fill text-success float-end" 
+            onclick=" this.dispatchEvent(new CustomEvent('savstg', {
+              bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
+            }))"></a> 
+          <a href="#/" class="me-2 bi-trash text-danger float-end" 
+            onclick="this.dispatchEvent(new CustomEvent('delstg', {
+              bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
+            }))"></a> 
+        </div>
+    </div>`;
 
-    fullCard = fullCard.replace("STG_FOOTER", footer);
-    fullCard = fullCard.replace("FOOTER_DATA", "Created On: " + new Date(stg.time).toLocaleString());
+    return new StrategyFullCardElement(fullCardHTML, "col");
+  }
+}
 
-    return fullCard;
+class StrategyCard extends Strategy {
+  constructor(name, stg=null) {
+    super(name);
+    
+    //console.log(`Creating Card [${name}] ${ (stg) ? "with stg" : "without stg"}`);
+    this._fullCardParentJNode = null;
+    this._valueCardParentJNode = null;
+
+    this._fullCardJNode = null;
+    this._valueCardJNode = null;
+
+    if (stg) {
+      this._assign(stg);
+    }
   }
 
-  delete(stgID, legID) {
-    if (legID) {
-      // delete the leg from given strategy
-    } else {
-      // No Leg ID, so delete the strategy from the strategy list
-      // Globals.getList().delete(stgID);
+  setParentNodeIDs(fullNodeID, valueNodeID) {
+    //console.log(`Setting parents Full [${fullNodeID}], Mini [${valueNodeID}]`);
+    this._fullCardParentJNode = $("#" + fullNodeID);
+    this._valueCardParentJNode = $("#" + valueNodeID);
+  }
+
+  update() {
+    
+    //this._fullCardJNode = $(StrategyCardRenderer.getInstance().getFullCard(this));
+    this._fullCardJNode = $(new StrategyFullCardElement(this));
+    if (this.isinFullView) {
+      this.showInFullView();
+    }
+
+    //this._valueCardJNode = $(StrategyCardRenderer.getInstance().getValueCard(this));
+    this._valueCardJNode = $(new StrategyValueCardElement(this));
+    this.updateValueCardView();
+  }
+
+  _assign(other) {
+    // Takeover all attributes of other
+    super._assign(other);
+    this.update();
+  }
+
+  clone() {
+    let base = super.clone();
+    let newobj = new StrategyCard(base.name);
+    newobj._assign(base);
+
+    return newobj;
+  }
+
+  copy() {
+    let base = super.copy();
+    let newobj = new StrategyCard(base.name);
+    newobj._assign(base);
+
+    return newobj;
+  }
+
+  static fromObject(obj) {
+    let stg = Strategy.fromObject(obj);
+    
+    return new StrategyCard(stg.name, stg);
+  }
+
+  add(leg, settle) {
+    super.add(leg, settle);
+    this.update();
+  }
+
+  remove(legID) {
+    super.remove(legID);
+    this.update();
+  }
+
+  async updatePrice(tmstmp, resolve, reject) {
+    let res = await super.updatePrice(tmstmp, resolve, reject);
+    this.update();
+    return res;
+  }
+
+  async delete() {
+    this.removeFromViews();
+    return await super.delete();
+  }
+
+  get jFullCardNode() {
+    return this._fullCardJNode;
+  }
+
+  get jValueCardNode() {
+    return this._valueCardJNode;
+  }
+
+  get jFullViewNode() {
+    return this._fullCardParentJNode;
+  }
+
+  get jValueViewNode() {
+    return this._valueCardParentJNode;
+  }
+
+  get isinFullView() {
+    // Checks whether this card is in Full View or not
+    if (this.jFullViewNode) {
+      let child = this.jFullViewNode.find(".card");
+      if (child) {
+        return child.attr("id") === this.id;
+      }
+    }
+
+    return false;
+  }
+
+  showInFullView() {
+    if (this.jFullViewNode) {
+      this.jFullViewNode.empty().append(this.jFullCardNode);
+    }
+  }
+
+  get isinValueCardView() {
+    if (this.jValueViewNode) {
+      return this.jValueViewNode.children("#" + this.id).length > 0;
+    }
+  }
+
+  updateValueCardView() {
+    if (this.jValueViewNode) {
+      if (this.isinValueCardView) {
+        //console.log(`Replacing ${this.id} to ValueCardView ${this._valueCardParentJNode.attr("id")}`);
+        this.jValueViewNode.children("#" + this.id).replaceWith(this.jValueCardNode);
+      } else {
+        //console.log(`Apppending ${this.id} to ValueCardView ${this._valueCardParentJNode.attr("id")}`);
+        this.jValueViewNode.append(this.jValueCardNode);
+      }
+    }
+  }
+
+  removeFromViews() {
+    if (this.isinFullView) {
+      this.jFullViewNode.empty();
+    }
+
+    if (this.isinValueCardView) {
+      this.jValueViewNode.children("#" + this.id).remove();
     }
   }
 }
+
+class StrategyFullCardElement extends HTMLDivElement {
+  constructor(stg) {
+    super();
+    // element created
+
+    this.stg = stg;
+
+    this.className = "col";
+    this.innerHTML = this.getFullCard(stg);
+  }
+
+  getFullCard(stg) {
+    // // Raises savstg, delleg and delstg events
+    if (!stg) {
+      // We can return an empty editor look
+      return "";
+    }
+
+    let allLegs = "";
+    for (let i = 0; i < stg.legs.length; i++) {
+      let leg = stg.legs[i];
+
+      let row = `<tr>
+      <th scope="row">${(i + 1).toString()}</th>
+      <td> ${leg.key}</td>
+      <td>${leg.isBuy ? "Buy" : "Sell"}</td>
+      <td>${leg.isBuy ? "" : "-"}${leg.tqty.toString()}</td>
+      <td>${leg.entryPrice.toFixed(2)}</td>
+      <td>${leg.curPrice.toFixed(2)}</td>
+      <td class=${leg.curPosition >= 0 ? "text-success" : "text-danger"}>${leg.curPosition.toFixed(2)}</td>
+      <td></td>
+      <td></td>
+      <td>
+        <a class="bi-trash text-danger" href="#/" aria-label="Remove" 
+          onclick="this.dispatchEvent(new CustomEvent('delleg', {
+            bubbles: true, calcelable: true, detail: { stg: '${stg.id}', leg: '${leg.id}' } 
+          }))"></a>
+      </td>
+      </tr>
+      `;
+
+      allLegs += row;
+    }
+
+    let footer = `<tr> 
+    <td></td> 
+    <td></td> 
+    <td></td> 
+    <td></td> 
+    <td></td> 
+    <td></td> 
+    <td>0</td> 
+    <td></td> 
+    <td>0</td> 
+    </tr>`;
+
+    let fullCardHTML = `
+      <div class="card text-center mb-3" id="${stg.id}"> 
+        <div class="card-header"> 
+          <div class="d-flex"> 
+            <div class="me-auto align-self-center"> 
+              <span>${stg.name}</span>
+            </div> 
+            <ul class="nav nav-pills" role="tablist"> 
+              <li class="nav-item" role="presentation"> 
+                <a href="#" class="nav-link active" id="legs-tab${stg.id}" data-bs-toggle="pill" 
+                  data-bs-target="#legs${stg.id}" type="button" role="tab" aria-controls="legs" 
+                  aria-selected="true">Legs</a>
+              </li> 
+              <li class="nav-item" role="presentation"> 
+              <a href="#" class="nav-link" id="greeks-tab${stg.id}" data-bs-toggle="pill" 
+                data-bs-target="#greeks${stg.id}" type="button" role="tab" aria-controls="greeks" 
+                aria-selected="false">Greeks</a> 
+              </li> 
+              <li class="nav-item" role="presentation"> 
+                <a href="#" class="nav-link disabled" id="other-tab${stg.id}" data-bs-toggle="pill" 
+                  data-bs-target="#other${stg.id}" type="button" role="tab" aria-controls="other" 
+                  aria-selected="false" tabindex="-1" aria-disabled="true">Disabled</a> 
+              </li> 
+            </ul> 
+          </div> 
+        </div> 
+        <div class="card-body tab-content"> 
+          <div class="tab-pane fade show active" id="legs${stg.id}" role="tabpanel" 
+            aria-labelledby="legs-tab${stg.id}"> 
+            <div class="table-responsive"> 
+              <table class="table caption-top table-sm"> 
+                <thead>
+                  <tr> 
+                    <th scope="col">#</th> 
+                    <th scope="col">Instrument</th> 
+                    <th scope="col">B/S</th> 
+                    <th scope="col">Qty</th> 
+                    <th scope="col">Entry Price</th> 
+                    <th scope="col">Current Price</th> 
+                    <th scope="col">Live P&L</th> 
+                    <th scope="col">Exit Price</th> 
+                    <th scope="col">P&L</th> 
+                    <th scope="col"> </th>  
+                  </tr>
+                </thead> 
+                <tbody>${allLegs}</tbody> 
+                <tfoot> ${footer} </tfoot> 
+              </table> 
+            </div> 
+          </div> 
+          <div class="tab-pane fade" id="greeks${stg.id}" role="tabpanel" 
+            aria-labelledby="greeks-tab${stg.id}"> Greeks </div>  
+          <div class="tab-pane fade" id="other${stg.id}" role="tabpanel" 
+            aria-labelledby="other-tab${stg.id}"> Other </div> 
+        </div> 
+        <div class="card-footer text-muted"> 
+          <small>Created On: ${new Date(stg.createTime).toLocaleString()}</small> 
+          <a href="#/" class="me-2 bi-save-fill text-success float-end" 
+            onclick=" this.dispatchEvent(new CustomEvent('savstg', {
+              bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
+            }))"></a> 
+          <a href="#/" class="me-2 bi-trash text-danger float-end" 
+            onclick="this.dispatchEvent(new CustomEvent('delstg', {
+              bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
+            }))"></a> 
+        </div>
+    </div>`;
+
+    return fullCardHTML;
+  }
+
+  connectedCallback() {
+    // browser calls this method when the element is added to the document
+    // (can be called many times if an element is repeatedly added/removed)
+    console.log("connected");
+  }
+
+  disconnectedCallback() {
+    // browser calls this method when the element is removed from the document
+    // (can be called many times if an element is repeatedly added/removed)
+    console.log("disconnected");
+  }
+
+  static get observedAttributes() {
+    return [/* array of attribute names to monitor for changes */];
+  }
+
+  attributeChangedCallback(name, oldValue, newValue) {
+    // called when one of attributes listed above is modified
+  }
+
+  adoptedCallback() {
+    // called when the element is moved to a new document
+    // (happens in document.adoptNode, very rarely used)
+  }
+
+  // there can be other element methods and properties
+}
+customElements.define("strategy-editor", StrategyFullCardElement, {extends: 'div'});
+
+class StrategyValueCardElementList extends HTMLDivElement {
+  constructor() {
+    super();
+  }
+}
+customElements.define("strategy-card-list", StrategyValueCardElementList, {extends: 'div'});
+
+class StrategyValueCardElement extends HTMLDivElement {
+  constructor(stg) {
+    super();
+    // element created
+
+    this.stg = stg;
+    let value = stg.curValue.toFixed(2);
+    this.className = "col mb-3";
+    this.id = stg.id;
+
+    this.innerHTML = `
+      <div class="card shadow-sm">
+        <div class="card-header">
+          <div>${stg.name}
+            <a class="bi-trash text-danger float-end" href="#/" 
+              onclick="this.dispatchEvent(new CustomEvent('delstg', {
+                bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
+              }))" aria-label="Remove"></a> 
+            <a class="bi-pencil-square text-${stg.isinFullView ? "danger" : "primary"} float-end me-2" href="#/" aria-label="Edit" 
+              onclick="this.dispatchEvent(new CustomEvent('edtstg', {
+                bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
+              }))"></a> 
+          </div>
+        </div> 
+        <div class="card-body text-center">
+          <h5 class="card-title text-${value >= 0 ? "success" : "danger"}">${value}</h5>
+          <span>${stg.count.toString()} Legs</span>
+        </div> 
+        <div class="card-footer text-muted"> 
+          <small> Created: ${new Date(stg.createTime).toLocaleString()}</small> 
+        </div> 
+      </div>`;
+  }
+
+  connectedCallback() {
+    // browser calls this method when the element is added to the document
+    // (can be called many times if an element is repeatedly added/removed)
+  }
+
+  disconnectedCallback() {
+    // browser calls this method when the element is removed from the document
+    // (can be called many times if an element is repeatedly added/removed)
+  }
+
+  static get observedAttributes() {
+    return [/* array of attribute names to monitor for changes */];
+  }
+
+  attributeChangedCallback(name, oldValue, newValue) {
+    // called when one of attributes listed above is modified
+  }
+
+  adoptedCallback() {
+    // called when the element is moved to a new document
+    // (happens in document.adoptNode, very rarely used)
+  }
+
+  // there can be other element methods and properties
+}
+customElements.define("strategy-card", StrategyValueCardElement, {extends: 'div'});
 
 class OptionChainPresenter {
   constructor() {

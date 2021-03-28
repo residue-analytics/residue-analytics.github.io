@@ -25,6 +25,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ion-rangeslider/2.3.1/js/ion.rangeSlider.min.js"></script>
 
   <script src="//cdn.jsdelivr.net/npm/pouchdb@7.2.1/dist/pouchdb.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/pouchdb@7.2.1/dist/pouchdb.find.min.js"></script>
   <script src="/js/classes.js"></script>
   <script src="/js/dbaccess.js"></script>
   <script src="/js/uicomps.js"></script>
@@ -234,7 +235,7 @@
       <pre class="row text-break" style="white-space:normal" id="output"></pre>
 
       <template id="editorTemplate">
-        <div class="card text-center mb-3" id="stgySTG_ID">
+        <div class="card text-center mb-3" id="STG_ID">
           <div class="card-header">
             <div class="d-flex">
               <div class="me-auto align-self-center"> <span>STG_NAME</span></div>
@@ -285,7 +286,7 @@
 
       </div>
       <template id="cardTemplate">
-        <div class="col" id="stgySTG_ID">
+        <div class="col" id="STG_ID">
           <div class="card shadow-sm">
             <div class="card-header">
               <div>STG_NAME<a class="bi-trash text-danger float-end" href="#" aria-label="Remove"></a> <a
@@ -296,7 +297,7 @@
           </div>
         </div>
       </template>
-      <div id="strategyCards" class="row row-cols-1 row-cols-md-3 row-cols-lg-4 mb-3">
+      <div is="strategy-card-list" id="strategyCards" class="row row-cols-1 row-cols-md-3 row-cols-lg-4 mb-3">
 
       </div>
 
@@ -305,16 +306,13 @@
 
   <script type="text/javascript">
 
-    var cacheSyms = null;
     var selector = null;
-    var strategy = null;
-    var cardRenderer = new StrategyCard("cardTemplate", "editorTemplate");
+    var cardRenderer = new StrategyCardRenderer();
 
     $(document).ready(setLayout);
 
     function setLayout() {
-      strategy = new Strategy("Edit Strategy");
-
+      globals.strategies = new StrategyList();
       var collapseElementList = [].slice.call(document.querySelectorAll('.collapse'));
       var collapseList = collapseElementList.map(function (collapseEl) {
         return new bootstrap.Collapse(collapseEl)
@@ -333,11 +331,39 @@
         "expiries", "strikes", "ce_pe", "days", "dateslider", "timeslider", "erroralert", getRecords);
 
       selector.cacheAllSelectors().then(data => {
-        cacheSyms = data;
+        DBFacade.fetchUserData(new StrategyList("editor", "strategyCards")).then(stgs => {
+          globals.strategies = stgs;
+          
+          updateStrategies();
+        });
+
         UIUtils.rmSpinner("buy"); UIUtils.rmSpinner("sell");
       }).catch(error => {
         UIUtils.showAlert("erroralert", error);
         UIUtils.rmSpinner("buy"); UIUtils.rmSpinner("sell");
+      });
+
+      // Custom Event handlers
+      editor.addEventListener("delleg", function(event) {
+        console.log("Caught delleg");
+        delLeg(event.detail.stg, event.detail.leg);
+      });
+      editor.addEventListener("delstg", function(event) {
+        console.log("Caught delstg");
+        delStrategy(event.detail.stg);
+      });
+      editor.addEventListener("savstg", function(event) {
+        console.log("Caught savstg");
+        savStrategy(event.detail.stg);
+      });
+
+      strategyCards.addEventListener("edtstg", function(event) {
+        console.log("Caught edtstg");
+        edtStrategy(event.detail.stg);
+      });
+      strategyCards.addEventListener("delstg", function(event) {
+        console.log("Caught delstg");
+        delStrategy(event.detail.stg);
       });
     }
 
@@ -349,7 +375,18 @@
     function addStrategy(id, action) {
 
       UIUtils.addSpinner(id);
-      let editor = document.getElementById("editor");
+      let strategy = null;
+      for (strategy of globals.strategies.values()) {
+        if (strategy.isinFullView) {
+          break;
+        } else {
+          strategy = null;
+        }
+      }
+
+      if (!strategy) {
+        strategy = new StrategyCard("Edit Strategy");
+      }
 
       try {
         let ltp = parseFloat(document.getElementById("LTP").value);
@@ -359,7 +396,7 @@
           throw new Error("Invalid LTP or Qty");
         }
 
-        let sym = cacheSyms.getLeaf($("#exchange").val(), $("#instrument").val(), $("#underlying").val());
+        let sym = globals.symbols.getLeaf($("#exchange").val(), $("#instrument").val(), $("#underlying").val());
         let leg = null;
         if (sym.isOption) {
           leg = new StrategyLeg(sym, $("#expiries").val(), "BUY" === action, qty, ltp, 
@@ -382,10 +419,12 @@
           leg.updatePrice(tmstmp).then(leg => {  // updatePrice() returns the leg itself
             console.log(strategy.add(leg));
             console.log(strategy.entryValue);
-            $(editor).empty().append($(cardRenderer.getFullCard(strategy)));
+            strategy.showInFullView();
+            //$(editor).empty().append($(cardRenderer.getFullCard(strategy)));
+            globals.strategies.add(strategy);  // Add it even if it's already present (as we cannot have duplicate keys in a map)
             UIUtils.rmSpinner(id);
           }).catch(error => {
-            output.innerHTML = JSON.stringify(error);
+            //output.innerHTML = JSON.stringify(error);
             console.log(error);
             UIUtils.rmSpinner(id);
             UIUtils.showAlert("erroralert", error);
@@ -397,7 +436,7 @@
         }
       } catch(error) {
 
-        output.innerHTML = JSON.stringify(error);
+        //output.innerHTML = JSON.stringify(error);
         console.log(error);
         UIUtils.rmSpinner(id);
         UIUtils.showAlert("erroralert", error);
@@ -413,7 +452,7 @@
           //output.innerHTML = JSON.stringify(response);
 
           let one = response.one;
-          $("#LTP").val(one.ltp);
+          $("#LTP").val(one.ltp.toFixed(2));
           $("#OI").val(one.oi == null ? "NA" : one.oi);
           
           //new DataTable().loadTable("output", response);
@@ -462,11 +501,91 @@
 
     function updateStrategies() {
       // update all strategies on the page
-      if (strategy) {
+      if (globals.strategies) {
         console.log("Updating Strategies");
+        let jCards = $("#strategyCards").empty();
+        for (let strategy of globals.strategies.values()) {
+          strategy.updateValueCardView();
+         //jCards.append($(cardRenderer.getValueCard(strategy)));
+        }
       } else {
         console.log("No strategies to update");
       }
+    }
+
+    function savStrategy(stgID) {
+      // BEWARE : strategy can be non-existent also (called in delete use-case also)
+      console.log("Saving " + stgID);
+      let strategy = globals.strategies.get(stgID);
+      let parent = document.getElementById("strategyCards");
+      let child = null;
+      for (let i = 0; i < parent.children.length; i++) {
+        child = parent.children[i];
+        if (child.id == stgID) {
+          break;
+        } else {
+          child = null;
+        }
+      }
+
+      if (!strategy) {
+        if (child) {
+          // child card is found but strategy not present in list, remove the card
+          $(child).remove();
+        }
+      } else {
+        if (!child) {
+          $("#strategyCards").append($(cardRenderer.getValueCard(strategy)));
+        } else {
+          $(child).replaceWith($(cardRenderer.getValueCard(strategy)));
+        }
+      }
+
+      globals.strategies.save();
+    }
+
+    function delLeg(stgID, legID) {
+      let strategy = globals.strategies.get(stgID);
+      console.log("Deleting leg " + legID + " of " + stgID);
+      if (strategy.id === stgID) {
+        strategy.remove(legID);
+        if (strategy.count === 0) {
+          // No legs left!!
+          globals.strategies.delete(stgID);
+          strategy = null;
+          UIUtils.showAlert("erroralert", "Last leg deleted, Start new");
+        }
+
+        // Only one strategy at a time in the editor
+        $("#editor").empty().append($(cardRenderer.getFullCard(strategy)));
+        savStrategy(stgID);
+        
+      } else {
+        console.log("strategy not found to remove leg!!");
+      }
+    }
+
+    function delStrategy(stgID) {
+      let strategy = globals.strategies.get(stgID);
+      console.log("Deleting stg " + stgID);
+      if (globals.strategies.delete(stgID)) {
+        // Remove the strategy cards from the Editor and from the card list
+        let child = $("#editor").find(".card");
+        console.log("Found child in editor " + child.attr("id"));
+        if ( stgID == child.attr("id") ) {
+          // As there can be only one strategy in the editor
+          $("#editor").empty();
+        }
+
+        //saveStrategy(stgID); 
+      }
+    }
+    
+    function edtStrategy(stgID) {
+      let stgCard = globals.strategies.get(stgID);
+      console.log("Editing stg " + stgID);
+      stgCard.showInFullView();
+      stgCard.update();
     }
 
   </script>

@@ -129,7 +129,7 @@ class UIUtils {
   }
 
 
-  static showAlert(alertNodeID, message) {
+  static showAlert(alertNodeID, message, durSecs=3) {
     const parentDiv = document.getElementById(alertNodeID);
     const alert = document.createElement('div');
     alert.className = 'alert alert-warning alert-dismissible fade show';
@@ -139,7 +139,9 @@ class UIUtils {
       '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
 
     parentDiv.appendChild(alert);
-    setTimeout(function () { $(".alert").alert('close') }, 2000);
+    if (durSecs > 0) {
+      setTimeout(function () { $("#" + alertNodeID + "> .alert").alert('close') }, durSecs * 1000);
+    }
   }
 
   static updateDatetimeSlider(sliderID, daysNodeID, singleThumb = false) {
@@ -501,13 +503,58 @@ class DataTable {
   }
 }
 
-class StrategyList {
+class GlobalData {
   constructor() {
-    this._stgs = new Map()
+    this._usr = "residue";
+    this._stgList = null;
+    this._syms = null;
+  }
+
+  get username() {
+    return this._usr;
+  }
+  set username(val) {
+    this._usr = val;
+  }
+
+  get strategies() {
+    return this._stgList;
+  }
+  set strategies(val) {
+    this._stgList = val;
+  }
+
+  get symbols() {
+    return this._syms;
+  }
+  set symbols(val) {
+    this._syms = val;
+  }
+}
+var globals = new GlobalData();
+
+class StrategyList {
+  constructor(fullView=null, miniView=null) {
+    this._stgs = new Map()  // id -> strategy
+    this._fullViewID = fullView;
+    this._miniViewID = miniView;
+  }
+
+  displayNodeIDs(fullView, miniView) {
+    this._fullViewID = fullView;
+    this._miniViewID = miniView;
+  }
+
+  get count() {
+    return this._stgs.size;
   }
 
   keys() {
     return this._stgs.keys();
+  }
+
+  values() {
+    return this._stgs.values();
   }
 
   has(stg) {
@@ -520,39 +567,122 @@ class StrategyList {
   }
 
   get(id) {
+    //console.log("get " + id);
     return this._stgs.get(id);
   }
 
   add(strategy) {
     if (strategy) {
+      if (strategy instanceof StrategyCard) {
+        strategy.setParentNodeIDs(this._fullViewID, this._miniViewID);
+      }
       this._stgs.set(strategy.id, strategy);
     }
   }
 
-  delete(stg) {
+  async delete(stg) {
     let id = stg;
-    if (stg instanceof Strategy) {
+    if (stg instanceof Strategy) {  // Can be StrategyCard also (sub-class of Strategy)
       id = stg.id;
+    } else {
+      stg = this.get(id);   // stg is not Strategy, i.e. it's a string, id.
     }
 
-    this._stgs.delete(id);
+    await stg.delete();  // Deletion from DB is done by Strategy.delete()
+    
+    return this._stgs.delete(id);
   }
 
-  load(owner) {
-    // Load from the DB for this owner
+  async load() {
+    // Load from the DB for the owner of the session
+    return await DBFacade.fetchUserData(this);
   }
 
-  save(owner) {
-    // Save in the DB for this owner
+  async save() {
+    // Save in the DB for the owner of the session
+    if (this.count) {
+      for (let value of this._stgs.values()) {
+        await value.save();
+      }
+    }
   }
 }
 
 class Strategy {
   constructor(name) {
-    this._id = Date.now();
+    this._id = "S" + Date.now().toString();
     this._name = name;
+    this._crtTime = Date.now();
     this._lastUpdTime = null;
     this._legs = [];
+  }
+  
+  _assign(other) {
+    // Takeover all the attributes of the other
+    this._id = other._id;
+    this._name = other._name;
+    this._crtTime = other._crtTime;
+    this._lastUpdTime = other._lastUpdTime;
+    this._legs = other._legs;
+    
+    // Nullify other (only legs is enough as other attributes are immutable)
+    other._legs = null;
+  }
+
+  clone() {
+    // All attributes are same
+    let newobj = new Strategy(this._name);
+    newobj._id = this._id;
+    newobj._crtTime = this._crtTime;
+    newobj._lastUpdTime = this._lastUpdTime;
+    for (let i = 0; i < this._legs.length; i++) {
+      newobj._legs.push(this._legs[i].clone());
+    }
+
+    return newobj;
+  }
+
+  copy() {
+    // All attributes same except id and create time (incl of legs)
+    let newcopy = new Strategy(this._name);
+    newcopy._id = "S" + Date.now().toString();
+    newcopy._crtTime = Date.now();
+    newcopy._lastUpdTime = this._lastUpdTime;
+    for (let i = 0; i < this._legs.length; i++) {
+      newcopy._legs.push(this._legs[i].copy());
+    }
+
+    return newcopy;
+  }
+
+  toObject() {
+    let obj = {
+      id : this._id, n : this._name, ct : this._crtTime,
+      l : this._lastUpdTime, ls : []
+    }
+    for (let i = 0; i < this._legs.length; i++) {
+      obj.ls.push(this._legs[i].toObject());
+    }
+
+    return obj;
+  }
+  
+  _copyObject(obj) {
+    this._id = obj.id;
+    this._name = obj.n;
+    this._crtTime = obj.ct;
+    this._lastUpdTime = obj.l;
+    this._legs = [];
+    for (let i = 0; i < obj.ls.length; i++) {
+      this._legs.push(StrategyLeg.fromObject(obj.ls[i]));
+    }
+  }
+
+  static fromObject(obj) {
+    let stg = new Strategy(obj.n);
+    stg._copyObject(obj);
+
+    return stg;
   }
 
   add(leg, settle = false) {
@@ -578,8 +708,16 @@ class Strategy {
     return true;
   }
 
+  remove(legID) {
+    for (let i = 0; i < this._legs.length; i++) {
+      if (legID === this._legs[i].id) {
+        this._legs.splice(i, 1);
+      }
+    }
+  }
+
   get entryValue() {
-    let total = 0;
+    let total = 0.0;
     for (let i = 0; i < this._legs.length; i++) {
       if (this._legs[i].isBuy) {
         total -= this._legs[i].entryValue;
@@ -588,11 +726,12 @@ class Strategy {
       }
     }
 
-    return total;
+    return (1 * total).toFixed(2);
   }
 
   get curValue() {
     let total = 0;
+
     for (let i = 0; i < this._legs.length; i++) {
       if (this._legs[i].isBuy) {
         total -= this._legs[i].curValue;
@@ -636,18 +775,28 @@ class Strategy {
     });
   }
 
+  async save() {
+    return await DBFacade.saveUserData(this);
+  }
+
+  async delete() {
+    return await DBFacade.deleteUserData(this);
+  }
+
   get id() {
     return this._id;
   }
-
   set id(val) {
     this._id = val;
+  }
+
+  get createTime() {
+    return this._crtTime;
   }
 
   get name() {
     return this._name;
   }
-
   set name(val) {
     this._name = val;
   }
@@ -685,31 +834,71 @@ class StrategyLeg {
       this._isOpt = sym.isOption;
     }
 
-    this._id = Date.now();
+    this._id = "L" + Date.now().toString();
+    this._crtTime = Date.now();
     this._key = null;
     this._e = exp;        // in YYYYMMDD format (value of selector)
     this._s = stk;
     this._cp = cepe;      // "CE" or "PE"
     this._buy = isBuy;    // If not BUY, it's a SELL
-    this._prc = prc;      // Entry Price per share (needs to mul by lot size)
+    this._prc = parseFloat(prc);      // Entry Price per share (needs to mul by lot size)
     this._curPrc = 0;
-    this._q = qty;        // Lots
+    this._q = parseInt(qty);        // Lots
 
     this._lastUpdTm = null;
     this._auditRecs = new Map();  // Changes made to this leg, tm -> clone of leg
   }
 
   clone() {
+    // All attributes are expected to be same in clone
     let newobj = new StrategyLeg(null, this._e, this._buy, this._q, this._prc,
       this._s, this._cp);
     newobj._id = this._id;
+    newobj._crtTime = this._crtTime;
     newobj._a = this._a;
     newobj._b = this._b;
     newobj._c = this._c;
     newobj._isOpt = this._isOpt;
     newobj._curPrc = this._curPrc;
     newobj._lastUpdTm = this._lastUpdTm;
-    // We do not clone audit records, as cloned records are added to audit records (infinite depth)
+    // We do not clone audit records, as cloned records are added to audit records (will create circular reference)
+
+    return newobj;
+  }
+
+  copy() {
+    // All attributes are same except new id and create time
+    let newcopy = this.clone();
+    newcopy._id = "L" + Date.now().toString();
+    newcopy._crtTime = Date.now();
+
+    return newcopy;
+  }
+
+  toObject() {
+    // Not taking key (can be recreated based on abc)
+    return {
+      a : this._a, b : this._b, c : this._c,
+      cp : this._cp, ct : this._crtTime, e : this._e, 
+      id : this._id, io : this._isOpt, l : this._lastUpdTm,
+      p : this._prc, q : this._q, r : this._curPrc,
+      s : this._s, y : this._buy
+    };
+  }
+
+  static fromObject(obj) {
+    let newobj = new StrategyLeg(null, obj.e, obj.y, obj.q, obj.p,
+      obj.s, obj.cp);
+    newobj._id = obj.id;
+    newobj._crtTime = obj.ct;
+    newobj._a = obj.a;
+    newobj._b = obj.b;
+    newobj._c = obj.c;
+    newobj._isOpt = obj.io;
+    if (obj.r) {
+      newobj._curPrc = parseFloat(obj.r);
+    }
+    newobj._lastUpdTm = obj.l;
 
     return newobj;
   }
@@ -802,10 +991,13 @@ class StrategyLeg {
     // Unique for one user across all strategies (timestamp)
     return this._id;
   }
-
   set id(val) {
     // set during load from DB
     this._id = val;
+  }
+
+  get createTime() {
+    return this._crtTime;
   }
 
   get isOption() {
@@ -859,26 +1051,24 @@ class StrategyLeg {
   get entryPrice() {
     return this._prc;
   }
-
   set entryPrice(val) {
-    this._prc = val;
+    this._prc = parseFloat(val);
   }
 
   get curPrice() {
+    //console.log(typeof(this._curPrc) + " " + this._curPrc);
     return this._curPrc;
   }
-
   set curPrice(val) {
-    this._curPrc = val;
+    this._curPrc = parseFloat(val);
     this.updatedNow();
   }
 
   get lots() {
     return this._q;
   }
-
   set lots(val) {
-    this._q = val;
+    this._q = parseInt(val);
   }
 
   get tqty() {
@@ -889,7 +1079,6 @@ class StrategyLeg {
     // epoch time in msec
     return this._lastUpdTm.getTime();
   }
-
   set lastUpdateTime(val) {
     // val can be null/0, epoch time in msec
     if (!val) {
@@ -1157,7 +1346,6 @@ class Record {
 
     if (!prc && this.O) {
       prc = (this.O + this.H + this.L + this.C) / 4;
-      prc = prc.toFixed(2);
     }
 
     return prc;
@@ -1937,7 +2125,7 @@ class DBOps {
     let resps = new DBResultList();
     for (let i = 0; i < docs.length; i++) {
       try {
-        resps.push(await this.put(docs[i], true));
+        resps.push(await this.put(docs[i], pre));
       } catch (err) {
         let result = new DBResult();
         result.error = new DBError("Error while put bulk", err);
@@ -2508,6 +2696,126 @@ class ListsDB {
   }
 }
 
+class UserDB {
+  constructor() {
+    this.db_name = "userdata";
+    this.db = new PouchDB(this.db_name, { revs_limit: 5 });
+
+    // keys - <user>:<stgy|pref|wtch|subs>:<id>
+  }
+
+  crtUserRecID(docID, owner, type) {
+    return [owner, type, docID].join(':');
+  }
+
+  crtUserRecord(data, owner, type) {
+    // Return the new record that can be saved in the User DB
+    return {
+      _id : this.crtUserRecID(data.id, owner, type),
+      $w : owner,
+      $y : type,
+      $d : data
+    };
+  }
+
+  async fetchAllStrategies(owner) {
+    let idxRes = await this.db.createIndex({
+      index : {
+        fields : ['$w', '$y']
+      }
+    });
+
+    console.log("Index " + idxRes);
+
+    let result = await this.db.find({
+        selector : {
+          $w : owner,
+          $y : 'stgy'
+        },
+        fields: ['$d']
+      });
+
+    let dataRes = []
+    for (let i = 0; i < result.docs.length; i++) {
+      dataRes.push(result.docs[i]['$d']);
+    }
+
+    return dataRes;
+  }
+
+  async fetchStrategy(owenr, id) {
+    let doc = await this._get(this.crtUserRecID(id, owner, "stgy"));
+    return doc["$d"];
+  }
+
+  async saveStrategy(owner, data) {
+    if (owner && data) {
+      return await this._save(this.crtUserRecord(data, owner, "stgy"), true);
+    }
+
+    return false;
+  }
+
+  async removeStrategy(owner, data) {
+    // data can be ID or the object
+    let doc = null;
+
+    if (typeof (data) === "string") {
+      // We got an ID of the strategy?
+      doc = await this._get(this.crtUserRecID(data, owner, "stgy"));
+    } else {
+      doc = await this._get(this.crtUserRecID(data.id, owner, "stgy"));
+    }
+
+    // doc now has _id and _rev
+    return await this.delete(doc);
+  }
+
+  async destroy() {
+    // Returns boolean
+    let resp = await this.db.destroy().catch(function (err) { throw new DBError("Unable to destroy [" + this.name + "]", err) });
+    return resp.ok;
+  }
+
+  async _get(id) {
+    return await this.db.get(id);
+  }
+
+  async _save(doc, pre = false) {
+    // append works only with pre and array doc.data
+    let dbrec = null;
+
+    if (pre) {
+      // Pre-check whether record already exists
+      if (doc._id) {
+        try {
+          dbrec = await this.db.get(doc._id);
+          //console.log(dbrec);
+        } catch (err) {
+          // Ignore error, document need not exist in the db
+          console.log("Doc [" + doc._id + "] not found [" + err + "] in DB [" + this.db_name + "]");
+        }
+
+        if (dbrec) {
+          console.log("document [" + doc._id + "] exists in DB [" + this.db_name + "], updating _rev [" + dbrec._rev + "]");
+          doc._rev = dbrec._rev;
+        }
+      }
+    }
+
+    let resp = await this.db.put(doc);
+    return resp.ok;
+  }
+
+  async delete(doc) {
+    if (doc._deleted === undefined || doc._deleted === null) {
+      doc._deleted = true;
+    }
+
+    return await this._save(doc, true);
+  }
+}
+
 class DBFactory {
   constructor() {
   }
@@ -2716,6 +3024,7 @@ class DBFacade {
       }
 
       DBFacade.symList = new SymbolList(data);
+      globals.symbols = DBFacade.symList;
       return DBFacade.symList;
     }
 
@@ -2782,6 +3091,36 @@ class DBFacade {
     }
 
     return { stks: sym.getStrikes(d), days: sym.getDays(d) };
+  }
+
+  static async fetchUserData(data) {
+    let db = new UserDB();
+    if (data instanceof StrategyList) {
+      let dataList = await db.fetchAllStrategies(globals.username);
+      for (let i = 0; i < dataList.length; i++) {
+        data.add(StrategyCard.fromObject(dataList[i]));
+      }
+    }
+
+    return data;  // Return data, though it's already updated, for resolvers to process
+  }
+
+  static async saveUserData(data) {
+    let db = new UserDB();
+    if (data instanceof Strategy) {
+      return await db.saveStrategy(globals.username, data.toObject());
+    } else if (data instanceof StrategyList) {
+      return await data.save();  // Kind of recursive as of now
+    }
+  }
+
+  static async deleteUserData(data) {
+    let db = new UserDB();
+    if (data instanceof Strategy) {
+      return await db.removeStrategy(globals.username, data);
+    } else if (data instanceof StrategyList) {
+      console.log("Deletion of StrategyList is not implemented")
+    }
   }
 }
 
