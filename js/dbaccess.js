@@ -573,9 +573,9 @@ class StrategyList {
 
   add(strategy) {
     if (strategy) {
-      if (strategy instanceof StrategyCard) {
-        strategy.setParentNodeIDs(this._fullViewID, this._miniViewID);
-      }
+      //if (strategy instanceof StrategyCard) {
+      //  strategy.setParentNodeIDs(this._fullViewID, this._miniViewID);
+      //}
       this._stgs.set(strategy.id, strategy);
     }
   }
@@ -743,6 +743,20 @@ class Strategy {
     return total;
   }
 
+  get curPosition() {
+    let total = 0;
+
+    for (let i = 0; i < this._legs.length; i++) {
+      if (this._legs[i].isBuy) {
+        total -= this._legs[i].curPosition;
+      } else {
+        total += this._legs[i].curPosition;
+      }
+    }
+
+    return total;
+  }
+
   async updatePrice(tmstmp, resolve, reject) {
     const promises = [];
     for (let i = 0; i < this._legs.length; i++) {
@@ -835,16 +849,16 @@ class StrategyLeg {
     }
 
     this._id = "L" + Date.now().toString();
-    this._crtTime = (crtTm) ? crtTm : Date.now();
+    this._crtTime = (crtTm) ? crtTm : Date.now();  // Traded On
     this._key = null;
-    this._e = exp;        // in YYYYMMDD format (value of selector)
+    this._e = exp;           // in YYYYMMDD format (value of selector)
     this._s = stk;
-    this._cp = cepe;      // "CE" or "PE"
-    this._buy = isBuy;    // If not BUY, it's a SELL
-    this._prc = parseFloat(prc);      // Entry Price per share (needs to mul by lot size)
+    this._cp = cepe;         // "CE" or "PE"
+    this._buy = isBuy;       // If not BUY, it's a SELL
+    this._prc = parseFloat(prc);   // Entry Price per share (needs to mul by lot size)
     this._curPrc = 0;
-    this._q = parseInt(qty);        // Lots
-
+    this._q = parseInt(qty); // Lots
+    this._extPrc = 0;        // Exit Price, min value 0.05
     this._lastUpdTm = null;
     this._auditRecs = new Map();  // Changes made to this leg, tm -> clone of leg
   }
@@ -860,6 +874,7 @@ class StrategyLeg {
     newobj._c = this._c;
     newobj._isOpt = this._isOpt;
     newobj._curPrc = this._curPrc;
+    newobj._extPrc = this._extPrc;
     newobj._lastUpdTm = this._lastUpdTm;
     // We do not clone audit records, as cloned records are added to audit records (will create circular reference)
 
@@ -881,15 +896,14 @@ class StrategyLeg {
       cp : this._cp, ct : this._crtTime, e : this._e, 
       id : this._id, io : this._isOpt, l : this._lastUpdTm,
       p : this._prc, q : this._q, r : this._curPrc,
-      s : this._s, y : this._buy
+      s : this._s, x: this._extPrc, y : this._buy
     };
   }
 
   static fromObject(obj) {
     let newobj = new StrategyLeg(null, obj.e, obj.y, obj.q, obj.p,
-      obj.s, obj.cp);
+      obj.s, obj.cp, obj.ct);
     newobj._id = obj.id;
-    newobj._crtTime = obj.ct;
     newobj._a = obj.a;
     newobj._b = obj.b;
     newobj._c = obj.c;
@@ -897,13 +911,16 @@ class StrategyLeg {
     if (obj.r) {
       newobj._curPrc = parseFloat(obj.r);
     }
+    if (obj.x) {
+      newobj._extPrc = parseFloat(obj.x);
+    }
     newobj._lastUpdTm = obj.l;
 
     return newobj;
   }
 
   matches(other) {
-    // Returns true if "this" matches "other" based on option/future attributes (not bs/qty/prc)
+    // Returns true if "this" matches "other" based on option/future contract attributes (not bs/qty/prc)
     if (this.a === other.a && this.b === other.b && this.c === other.c &&
       this.exp === other.exp && this.stk === other.stk && this.cepe == other.cepe) {
       return true;
@@ -935,7 +952,7 @@ class StrategyLeg {
     }
     
     let resList = await this.getRecord(tmstmp);
-    this.curPrice = resList.one.ltp;  // This will call updatedNow()
+    this.curPrice = resList.one.ltp;  // setter will call this.updatedNow()
 
     return this;  // return self to aid the callbacks
   }
@@ -951,21 +968,25 @@ class StrategyLeg {
     }
   }
 
-  get curPosition() {
-    // Position shows this legs P&L wrt entryPrice & curPrice (must be updated before calling)
-    return this.isBuy ? (this.curValue - this.entryValue) : (this.entryValue - this.curValue);
-  }
-
   get entryValue() {
     return this.tqty * this.entryPrice;
   }
 
   get curValue() {
+    if (this.extPrice > 0) {  // As this leg has been exited, value is now fixed
+      return this.tqty * this.extPrice;
+    }
+
     if (!this.curPrice) {
       throw new ResError(ResErrorCode.NO_DATA, "Current Price not available");
     }
 
     return this.tqty * this.curPrice;
+  }
+
+  get curPosition() {
+    // Position shows this legs P&L wrt entryPrice & curPrice/extPrice (must be updated before calling)
+    return this.isBuy ? (this.curValue - this.entryValue) : (this.entryValue - this.curValue);
   }
 
   get key() {
@@ -1061,6 +1082,10 @@ class StrategyLeg {
   set curPrice(val) {
     this._curPrc = parseFloat(val);
     this.updatedNow();
+  }
+
+  get extPrice() {
+    return this._extPrc;
   }
 
   get lots() {

@@ -329,7 +329,7 @@ class ResDataSelector {
   }
 }
 
-// Not in Use
+/* // Not in Use
 class StrategyCardRenderer {
 
   constructor(cardTemplate=null, editorTemplate=null) {
@@ -740,6 +740,7 @@ class StrategyCard extends Strategy {
     }
   }
 }
+ */
 
 class StrategyFullCardElement extends HTMLDivElement {
   constructor(stg=null) {
@@ -841,9 +842,8 @@ class StrategyFullCardElement extends HTMLDivElement {
       <td>${leg.isBuy ? "" : "-"}${leg.tqty.toString()}</td>
       <td>${leg.entryPrice.toFixed(2)}</td>
       <td>${leg.curPrice.toFixed(2)}</td>
+      <td>${leg.extPrice > 0 ? leg.extPrice.toFixed(2) : ""}</td>
       <td class=${leg.curPosition >= 0 ? "text-success" : "text-danger"}>${leg.curPosition.toFixed(2)}</td>
-      <td></td>
-      <td></td>
       <td>
         <a class="bi-trash text-danger" href="#/" aria-label="Remove" 
           onclick="this.dispatchEvent(new CustomEvent('delleg', {
@@ -857,7 +857,7 @@ class StrategyFullCardElement extends HTMLDivElement {
     }
 
     if (allLegs.length === 0) {
-      allLegs = `<tr><td colspan="11">BUY or SELL (add a Leg)</td></tr>`;
+      allLegs = `<tr><td colspan="10">BUY or SELL (add a Leg)</td></tr>`;
     }
 
     let footer = `<tr> 
@@ -868,10 +868,9 @@ class StrategyFullCardElement extends HTMLDivElement {
     <td></td> 
     <td></td> 
     <td></td> 
-    <td>0</td> 
     <td></td> 
     <td>0</td>
-    <td></td> 
+    <td></td>
     </tr>`;
 
     let fullCardHTML = `
@@ -915,7 +914,6 @@ class StrategyFullCardElement extends HTMLDivElement {
                     <th scope="col">Qty</th> 
                     <th scope="col">Entry Price</th> 
                     <th scope="col">Current Price</th> 
-                    <th scope="col">Live P&L</th> 
                     <th scope="col">Exit Price</th> 
                     <th scope="col">P&L</th> 
                     <th scope="col"> </th>  
@@ -989,11 +987,11 @@ class StrategyValueCardElementList extends HTMLDivElement {
     // First child is a null child which lets users to create new strategies/cards
     this.appendChild( new StrategyValueCardElement(null) );
 
-    if (stgList) {
+/*     if (stgList) {
       jqThis.data("stgList", stgList);  // Save a reference, not a copy
     } else {
       stgList = jqThis.data("stgList");
-    }
+    } */
 
     if (stgList) {
       for (let strategy of stgList.values()) {
@@ -1058,7 +1056,7 @@ class StrategyValueCardElement extends HTMLDivElement {
       return `
       <div class="card shadow-sm">
         <div class="card-header">
-          <div>Add New
+          <div>Strategy
             <i class="bi-trash text-danger float-end" aria-label="Remove"></i> 
             <a class="bi-pencil-square text-primary float-end me-2" href="#/" aria-label="Edit" 
               onclick="this.dispatchEvent(new CustomEvent('addstg', {
@@ -1072,7 +1070,7 @@ class StrategyValueCardElement extends HTMLDivElement {
             onclick="this.dispatchEvent(new CustomEvent('addstg', {
               bubbles: true, calcelable: true }))"></i>
           </h5>
-          <span>Start New</span>
+          <span>Create New</span>
         </div> 
         <div class="card-footer text-muted"> 
           <small>&nbsp;</small> 
