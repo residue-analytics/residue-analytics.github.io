@@ -329,6 +329,7 @@ class ResDataSelector {
   }
 }
 
+// Not in Use
 class StrategyCardRenderer {
 
   constructor(cardTemplate=null, editorTemplate=null) {
@@ -590,10 +591,13 @@ class StrategyCardRenderer {
   }
 }
 
+// Not in Use
 class StrategyCard extends Strategy {
   constructor(name, stg=null) {
-    super(name);
     
+    super(name);
+    throw Error("Cannot use StrategyCard");
+
     //console.log(`Creating Card [${name}] ${ (stg) ? "with stg" : "without stg"}`);
     this._fullCardParentJNode = null;
     this._valueCardParentJNode = null;
@@ -738,23 +742,93 @@ class StrategyCard extends Strategy {
 }
 
 class StrategyFullCardElement extends HTMLDivElement {
-  constructor(stg) {
+  constructor(stg=null) {
     super();
     // element created
 
     this.stg = stg;
+    
+    this.innerHTML = this.getFullCard( (stg) ? stg : new Strategy("Edit Name") );
+  }
 
-    this.className = "col";
-    this.innerHTML = this.getFullCard(stg);
+  get current() {
+    return this.stg;
+  }
+
+  update(stg=null) {
+    $(this).empty();
+    this.stg = stg;
+    this.innerHTML = this.getFullCard( (stg) ? stg : new Strategy("Edit Name") );
   }
 
   getFullCard(stg) {
     // // Raises savstg, delleg and delstg events
-    if (!stg) {
+/*     if (!stg) {
       // We can return an empty editor look
-      return "";
+      let stgid = Date.now();
+      return `
+      <div class="card text-center mb-3" id="${stgid}"> 
+        <div class="card-header"> 
+          <div class="d-flex"> 
+            <div class="me-auto align-self-center"> 
+              <span>New Strategy</span>
+            </div> 
+            <ul class="nav nav-pills" role="tablist"> 
+              <li class="nav-item" role="presentation"> 
+                <a href="#" class="nav-link active" id="legs-tab${stgid}" data-bs-toggle="pill" 
+                  data-bs-target="#legs${stgid}" type="button" role="tab" aria-controls="legs" 
+                  aria-selected="true">Legs</a>
+              </li> 
+              <li class="nav-item" role="presentation"> 
+              <a href="#" class="nav-link" id="greeks-tab${stgid}" data-bs-toggle="pill" 
+                data-bs-target="#greeks${stgid}" type="button" role="tab" aria-controls="greeks" 
+                aria-selected="false">Greeks</a> 
+              </li> 
+              <li class="nav-item" role="presentation"> 
+                <a href="#" class="nav-link disabled" id="other-tab${stgid}" data-bs-toggle="pill" 
+                  data-bs-target="#other${stgid}" type="button" role="tab" aria-controls="other" 
+                  aria-selected="false" tabindex="-1" aria-disabled="true">Disabled</a> 
+              </li> 
+            </ul> 
+          </div> 
+        </div> 
+        <div class="card-body tab-content"> 
+          <div class="tab-pane fade show active" id="legs${stgid}" role="tabpanel" 
+            aria-labelledby="legs-tab${stgid}"> 
+            <div class="table-responsive"> 
+              <table class="table table-sm mb-0"> 
+                <thead>
+                  <tr> 
+                    <th scope="col">#</th> 
+                    <th scope="col">Instrument</th> 
+                    <th scope="col">B/S</th> 
+                    <th scope="col">Qty</th> 
+                    <th scope="col">Entry Price</th> 
+                    <th scope="col">Current Price</th> 
+                    <th scope="col">Live P&L</th> 
+                    <th scope="col">Exit Price</th> 
+                    <th scope="col">P&L</th> 
+                    <th scope="col"> </th>  
+                  </tr>
+                </thead> 
+                <tbody><tr><td colspan="10">BUY or SELL (add a Leg)</td></tr></tbody> 
+              </table> 
+            </div> 
+          </div> 
+          <div class="tab-pane fade" id="greeks${stgid}" role="tabpanel" 
+            aria-labelledby="greeks-tab${stgid}"> Greeks </div>  
+          <div class="tab-pane fade" id="other${stgid}" role="tabpanel" 
+            aria-labelledby="other-tab${stgid}"> Other </div> 
+        </div> 
+        <div class="card-footer text-muted"> 
+          <small>${new Date().toLocaleString()}</small> 
+          <a href="#" class="me-2 bi-save-fill text-success float-end"></a> 
+          <a href="#" class="me-2 bi-trash text-danger float-end"></a> 
+        </div>
+      </div>`;
     }
-
+ */
+    
     let allLegs = "";
     for (let i = 0; i < stg.legs.length; i++) {
       let leg = stg.legs[i];
@@ -762,6 +836,7 @@ class StrategyFullCardElement extends HTMLDivElement {
       let row = `<tr>
       <th scope="row">${(i + 1).toString()}</th>
       <td> ${leg.key}</td>
+      <td> ${new Date(leg.createTime).toLocaleString()}</td>
       <td>${leg.isBuy ? "Buy" : "Sell"}</td>
       <td>${leg.isBuy ? "" : "-"}${leg.tqty.toString()}</td>
       <td>${leg.entryPrice.toFixed(2)}</td>
@@ -781,8 +856,13 @@ class StrategyFullCardElement extends HTMLDivElement {
       allLegs += row;
     }
 
+    if (allLegs.length === 0) {
+      allLegs = `<tr><td colspan="11">BUY or SELL (add a Leg)</td></tr>`;
+    }
+
     let footer = `<tr> 
     <td></td> 
+    <td></td>
     <td></td> 
     <td></td> 
     <td></td> 
@@ -790,10 +870,12 @@ class StrategyFullCardElement extends HTMLDivElement {
     <td></td> 
     <td>0</td> 
     <td></td> 
-    <td>0</td> 
+    <td>0</td>
+    <td></td> 
     </tr>`;
 
     let fullCardHTML = `
+    <div class="col">
       <div class="card text-center mb-3" id="${stg.id}"> 
         <div class="card-header"> 
           <div class="d-flex"> 
@@ -814,7 +896,7 @@ class StrategyFullCardElement extends HTMLDivElement {
               <li class="nav-item" role="presentation"> 
                 <a href="#" class="nav-link disabled" id="other-tab${stg.id}" data-bs-toggle="pill" 
                   data-bs-target="#other${stg.id}" type="button" role="tab" aria-controls="other" 
-                  aria-selected="false" tabindex="-1" aria-disabled="true">Disabled</a> 
+                  aria-selected="false" tabindex="-1" aria-disabled="true">P&L Chart</a> 
               </li> 
             </ul> 
           </div> 
@@ -823,11 +905,12 @@ class StrategyFullCardElement extends HTMLDivElement {
           <div class="tab-pane fade show active" id="legs${stg.id}" role="tabpanel" 
             aria-labelledby="legs-tab${stg.id}"> 
             <div class="table-responsive"> 
-              <table class="table caption-top table-sm"> 
+              <table class="table table-sm mb-0"> 
                 <thead>
                   <tr> 
                     <th scope="col">#</th> 
-                    <th scope="col">Instrument</th> 
+                    <th scope="col">Contract</th>
+                    <th scope="col">Traded On</th> 
                     <th scope="col">B/S</th> 
                     <th scope="col">Qty</th> 
                     <th scope="col">Entry Price</th> 
@@ -844,7 +927,7 @@ class StrategyFullCardElement extends HTMLDivElement {
             </div> 
           </div> 
           <div class="tab-pane fade" id="greeks${stg.id}" role="tabpanel" 
-            aria-labelledby="greeks-tab${stg.id}"> Greeks </div>  
+            aria-labelledby="greeks-tab${stg.id}"> Greeks (Not Available Yet) </div>  
           <div class="tab-pane fade" id="other${stg.id}" role="tabpanel" 
             aria-labelledby="other-tab${stg.id}"> Other </div> 
         </div> 
@@ -859,6 +942,7 @@ class StrategyFullCardElement extends HTMLDivElement {
               bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
             }))"></a> 
         </div>
+      </div>
     </div>`;
 
     return fullCardHTML;
@@ -877,7 +961,7 @@ class StrategyFullCardElement extends HTMLDivElement {
   }
 
   static get observedAttributes() {
-    return [/* array of attribute names to monitor for changes */];
+    return ["stgid"];  /* array of attribute names to monitor for changes */
   }
 
   attributeChangedCallback(name, oldValue, newValue) {
@@ -897,20 +981,109 @@ class StrategyValueCardElementList extends HTMLDivElement {
   constructor() {
     super();
   }
+
+  updateCards(stgList=null) {
+    let jqThis = $(this);
+    jqThis.empty();
+
+    // First child is a null child which lets users to create new strategies/cards
+    this.appendChild( new StrategyValueCardElement(null) );
+
+    if (stgList) {
+      jqThis.data("stgList", stgList);  // Save a reference, not a copy
+    } else {
+      stgList = jqThis.data("stgList");
+    }
+
+    if (stgList) {
+      for (let strategy of stgList.values()) {
+        this.appendChild( new StrategyValueCardElement(strategy) )
+      }
+    }
+  }
+
+  _getElem(stg) {
+    let stgID = stg;
+    if (stg instanceof Strategy) {
+      stgID = stg.id;
+    }
+
+    for (let i = 0; i < this.children.length; i++) {
+      // First child does not have a strategy (Start New - Card)
+      if (this.children[i].stg && stgID === this.children[i].stg.id) {
+        return this.children[i];
+      }
+    }
+
+    return null;
+  }
+
+  updateCard(stg, stgInEdit=false) {
+    // stg can be Strategy or String ID
+    let stgElem = this._getElem(stg);
+
+    if (stgElem) {
+      $(stgElem.replaceWith(new StrategyValueCardElement(stg, stgInEdit)));
+    } else {
+      this.appendChild(new StrategyValueCardElement(stg, stgInEdit));
+    }
+  }
+
+  removeCard(stg) {
+    // stg can be Strategy or String ID
+    let stgElem = this._getElem(stg);
+
+    if (stgElem) {
+      $(stgElem).remove();
+    }
+  }
 }
 customElements.define("strategy-card-list", StrategyValueCardElementList, {extends: 'div'});
 
 class StrategyValueCardElement extends HTMLDivElement {
-  constructor(stg) {
+  // Raises addstg, delstg and edtstg events
+  constructor(stg=null, stgInEdit=false) {
     super();
     // element created
 
     this.stg = stg;
-    let value = stg.curValue.toFixed(2);
     this.className = "col mb-3";
+    this.innerHTML = this.getValueCard(stg, stgInEdit);
+  }
+
+  getValueCard(stg, stgInEdit) {
+    if (!stg) {
+      this.id = Date.now();
+
+      return `
+      <div class="card shadow-sm">
+        <div class="card-header">
+          <div>Add New
+            <i class="bi-trash text-danger float-end" aria-label="Remove"></i> 
+            <a class="bi-pencil-square text-primary float-end me-2" href="#/" aria-label="Edit" 
+              onclick="this.dispatchEvent(new CustomEvent('addstg', {
+                bubbles: true, calcelable: true }))">
+            </a> 
+          </div>
+        </div> 
+        <div class="card-body text-center">
+          <h5 class="card-title text-success">
+            <i class="bi bi-plus-square-dotted" 
+            onclick="this.dispatchEvent(new CustomEvent('addstg', {
+              bubbles: true, calcelable: true }))"></i>
+          </h5>
+          <span>Start New</span>
+        </div> 
+        <div class="card-footer text-muted"> 
+          <small>&nbsp;</small> 
+        </div> 
+      </div>`;
+    }
+
+    let value = stg.curValue.toFixed(2);
     this.id = stg.id;
 
-    this.innerHTML = `
+    return `
       <div class="card shadow-sm">
         <div class="card-header">
           <div>${stg.name}
@@ -918,7 +1091,7 @@ class StrategyValueCardElement extends HTMLDivElement {
               onclick="this.dispatchEvent(new CustomEvent('delstg', {
                 bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
               }))" aria-label="Remove"></a> 
-            <a class="bi-pencil-square text-${stg.isinFullView ? "danger" : "primary"} float-end me-2" href="#/" aria-label="Edit" 
+            <a class="bi-pencil-square text-${stgInEdit ? "danger" : "primary"} float-end me-2" href="#/" aria-label="Edit" 
               onclick="this.dispatchEvent(new CustomEvent('edtstg', {
                 bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
               }))"></a> 

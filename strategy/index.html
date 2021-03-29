@@ -106,8 +106,9 @@
   </header>
 
   <div id="main">
-    
+
     <div class="container" id="titleContainer">
+  
       <div class="row text-center">
         <h4>Strategy Monitor</h4>
       </div>
@@ -116,7 +117,7 @@
           <h5>Create, Save and Monitor all your Options and Futures Strategies</h5> 
         </div>
         <div class="col-1 text-end">
-          <div id="selectorTooltip" data-bs-toggle="tooltip" data-bs-placement="auto" 
+          <div id="selectorTooltip" data-bs-toggle="tooltip" data-bs-placement="left" 
                data-bs-trigger="hover" title="Show/Hide Selector">
             <a id="collapseIcon" href="#selectorContainer" class="bi-arrows-collapse text-primary" role="button" 
                data-bs-toggle="collapse" aria-label="Collapse Selector" aria-expanded="true" 
@@ -125,7 +126,8 @@
           </div>
         </div>
       </div>
-    </div>
+      <div id="erroralert" class="row position-fixed top-0 end-0 m-3" style="z-index:1070"></div>
+    </div>  
     
     <div class="container collapse in p-3 pb-0 border rounded" id="selectorContainer">
       <div class="row row-cols-md-5 g-3 align-items-center mb-3 justify-content-evenly">
@@ -213,8 +215,8 @@
         </div>
         <div class="col-md-3 mb-3">
           <div class="input-group justify-content-center">
-            <button type="button" id="buy" class="btn btn-success" onclick="addStrategy(this.id, 'BUY')">BUY</button>
-            <button type="button" id="sell" class="btn btn-danger" onclick="addStrategy(this.id, 'SELL')">SELL</button>
+            <button type="button" id="buy" class="btn btn-success" onclick="addLeg(this.id, 'BUY')">BUY</button>
+            <button type="button" id="sell" class="btn btn-danger" onclick="addLeg(this.id, 'SELL')">SELL</button>
             <button type="button" id="livecontrol" class="btn btn-outline-secondary bi-stopwatch" onclick="liveMonitor(this)">
               <span class="badge bg-secondary">0</span>
             </button>
@@ -228,8 +230,7 @@
     </div>
 
     <div class="container" id="cardsContainer">
-      <div id="erroralert" class="row"></div>
-
+      
       <hr />
 
       <pre class="row text-break" style="white-space:normal" id="output"></pre>
@@ -282,8 +283,7 @@
           <div class="card-footer text-muted"> <small>FOOTER_DATA</small> </div>
         </div>
       </template>
-      <div id="editor" class="row">
-
+      <div id="editor" is="strategy-editor" class="row">
       </div>
       <template id="cardTemplate">
         <div class="col" id="STG_ID">
@@ -298,7 +298,7 @@
         </div>
       </template>
       <div is="strategy-card-list" id="strategyCards" class="row row-cols-1 row-cols-md-3 row-cols-lg-4 mb-3">
-
+      
       </div>
 
     </div>
@@ -307,12 +307,12 @@
   <script type="text/javascript">
 
     var selector = null;
-    var cardRenderer = new StrategyCardRenderer();
 
     $(document).ready(setLayout);
 
     function setLayout() {
       globals.strategies = new StrategyList();
+
       var collapseElementList = [].slice.call(document.querySelectorAll('.collapse'));
       var collapseList = collapseElementList.map(function (collapseEl) {
         return new bootstrap.Collapse(collapseEl)
@@ -320,7 +320,6 @@
 
       var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
       var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-
         return new bootstrap.Tooltip(tooltipTriggerEl, {
           container: document.getElementById("selectorTooltip")
         });
@@ -329,12 +328,10 @@
       UIUtils.addSpinner("buy"); UIUtils.addSpinner("sell");
       selector = new ResDataSelector("exchange", "instrument", "underlying",
         "expiries", "strikes", "ce_pe", "days", "dateslider", "timeslider", "erroralert", getRecords);
-
       selector.cacheAllSelectors().then(data => {
         DBFacade.fetchUserData(new StrategyList("editor", "strategyCards")).then(stgs => {
           globals.strategies = stgs;
-          
-          updateStrategies();
+          strategyCards.updateCards(globals.strategies);
         });
 
         UIUtils.rmSpinner("buy"); UIUtils.rmSpinner("sell");
@@ -357,6 +354,10 @@
         savStrategy(event.detail.stg);
       });
 
+      strategyCards.addEventListener("addstg", function(event) {
+        console.log("Caught addstg");
+        addStrategy();
+      });
       strategyCards.addEventListener("edtstg", function(event) {
         console.log("Caught edtstg");
         edtStrategy(event.detail.stg);
@@ -372,20 +373,28 @@
       $(node).toggleClass("bi-arrows-expand");
     }
 
-    function addStrategy(id, action) {
+    // Not used anymore
+    function updateStrategies() {
+      // update all strategies on the page
+
+       if (globals.strategies) {
+        console.log("Updating Strategies");  
+        for (let strategy of globals.strategies.values()) {
+          strategy.updateValueCardView();
+          //jCards.append($(cardRenderer.getValueCard(strategy)));
+        }
+      } else {
+        console.log("No strategies to update");
+      }
+  }
+
+    function addLeg(id, action) {
 
       UIUtils.addSpinner(id);
-      let strategy = null;
-      for (strategy of globals.strategies.values()) {
-        if (strategy.isinFullView) {
-          break;
-        } else {
-          strategy = null;
-        }
-      }
+      let strategy = editor.current;
 
       if (!strategy) {
-        strategy = new StrategyCard("Edit Strategy");
+        strategy = new Strategy("Edit Strategy");
       }
 
       try {
@@ -398,11 +407,12 @@
 
         let sym = globals.symbols.getLeaf($("#exchange").val(), $("#instrument").val(), $("#underlying").val());
         let leg = null;
+        let rangeSlider = $("#timeslider").data('ionRangeSlider');
         if (sym.isOption) {
           leg = new StrategyLeg(sym, $("#expiries").val(), "BUY" === action, qty, ltp, 
-                                $("#strikes").val(), $("#ce_pe").val());
+                                $("#strikes").val(), $("#ce_pe").val(), rangeSlider.result.from);
         } else if (sym.isFuture) {
-          leg = new StrategyLeg(sym, $("#expiries").val(), "BUY" === action, qty, ltp);
+          leg = new StrategyLeg(sym, $("#expiries").val(), "BUY" === action, qty, ltp, null, null, rangeSlider.result.from);
         } else {
           throw new Error("Cannot add Index to a Strategy");
         }
@@ -419,9 +429,7 @@
           leg.updatePrice(tmstmp).then(leg => {  // updatePrice() returns the leg itself
             console.log(strategy.add(leg));
             console.log(strategy.entryValue);
-            strategy.showInFullView();
-            //$(editor).empty().append($(cardRenderer.getFullCard(strategy)));
-            globals.strategies.add(strategy);  // Add it even if it's already present (as we cannot have duplicate keys in a map)
+            editor.update(strategy);
             UIUtils.rmSpinner(id);
           }).catch(error => {
             //output.innerHTML = JSON.stringify(error);
@@ -488,7 +496,7 @@
           if (timeLeft === 0) {
             timeLeft = 60;
             badge.text(timeLeft.toString());
-            updateStrategies();
+            strategyCards.updateCards(globals.strategies);
           } else {
             timeLeft--;
             badge.text(timeLeft.toString());
@@ -499,93 +507,79 @@
       }
     }
 
-    function updateStrategies() {
-      // update all strategies on the page
-      if (globals.strategies) {
-        console.log("Updating Strategies");
-        let jCards = $("#strategyCards").empty();
-        for (let strategy of globals.strategies.values()) {
-          strategy.updateValueCardView();
-         //jCards.append($(cardRenderer.getValueCard(strategy)));
-        }
-      } else {
-        console.log("No strategies to update");
+    function addStrategy() {
+      let strategy = editor.current;
+      if (strategy && globals.strategies.get(strategy.id)) {
+        strategyCards.updateCard(strategy, false); // This strategy is now moved out of editor
       }
+      editor.update(null);
     }
 
     function savStrategy(stgID) {
-      // BEWARE : strategy can be non-existent also (called in delete use-case also)
       console.log("Saving " + stgID);
-      let strategy = globals.strategies.get(stgID);
-      let parent = document.getElementById("strategyCards");
-      let child = null;
-      for (let i = 0; i < parent.children.length; i++) {
-        child = parent.children[i];
-        if (child.id == stgID) {
-          break;
-        } else {
-          child = null;
-        }
-      }
 
-      if (!strategy) {
-        if (child) {
-          // child card is found but strategy not present in list, remove the card
-          $(child).remove();
+      // Validate whether we are adding the right one or not
+      if (editor.current && editor.current.id === stgID) {
+        if (globals.strategies.get(stgID)) {
+          // Existing strategy being udpated in the editor
+          console.log("Updating existing strategy");
+        }
+
+        // Add it even if it's already present (we put clone()s in editor)
+        try {
+          globals.strategies.add(editor.current);
+          globals.strategies.save();
+
+          strategyCards.updateCard(editor.current, true);  // Strategy is in Editor
+        } catch (err) {
+          UIUtils.showAlert("erroralert", `Unable to save, Error [${err}]`);
         }
       } else {
-        if (!child) {
-          $("#strategyCards").append($(cardRenderer.getValueCard(strategy)));
-        } else {
-          $(child).replaceWith($(cardRenderer.getValueCard(strategy)));
-        }
+        UIUtils.showAlert("erroralert", `Cannot save this strategy, ID [${stgID}]`);
       }
-
-      globals.strategies.save();
     }
 
     function delLeg(stgID, legID) {
-      let strategy = globals.strategies.get(stgID);
       console.log("Deleting leg " + legID + " of " + stgID);
-      if (strategy.id === stgID) {
-        strategy.remove(legID);
-        if (strategy.count === 0) {
-          // No legs left!!
-          globals.strategies.delete(stgID);
-          strategy = null;
-          UIUtils.showAlert("erroralert", "Last leg deleted, Start new");
-        }
 
-        // Only one strategy at a time in the editor
-        $("#editor").empty().append($(cardRenderer.getFullCard(strategy)));
-        savStrategy(stgID);
-        
+      let strategy = editor.current;
+      
+      if (strategy.id === stgID) {
+        strategy.remove(legID);      
+        editor.update(strategy);
       } else {
         console.log("strategy not found to remove leg!!");
       }
     }
 
     function delStrategy(stgID) {
-      let strategy = globals.strategies.get(stgID);
       console.log("Deleting stg " + stgID);
-      if (globals.strategies.delete(stgID)) {
-        // Remove the strategy cards from the Editor and from the card list
-        let child = $("#editor").find(".card");
-        console.log("Found child in editor " + child.attr("id"));
-        if ( stgID == child.attr("id") ) {
-          // As there can be only one strategy in the editor
-          $("#editor").empty();
-        }
 
-        //saveStrategy(stgID); 
+      // Remove the strategy cards from the Editor and from the card list
+      if (editor.current && editor.current.id === stgID) {
+        editor.update(null);
+      }
+
+      if (globals.strategies.get(stgID)) {
+        strategyCards.removeCard(stgID);
+        globals.strategies.delete(stgID);
       }
     }
     
     function edtStrategy(stgID) {
-      let stgCard = globals.strategies.get(stgID);
       console.log("Editing stg " + stgID);
-      stgCard.showInFullView();
-      stgCard.update();
+
+      let toEdit = globals.strategies.get(stgID);
+      let curEdit = editor.current;
+
+      if (curEdit && curEdit.id !== toEdit.id) {
+        // Update the card to remove the "in-editor" indication
+        strategyCards.updateCard(curEdit, false);
+      }
+
+      editor.update(toEdit.clone());
+      // Update the card to show the "in-editor" indication
+      strategyCards.updateCard(toEdit, true);
     }
 
   </script>

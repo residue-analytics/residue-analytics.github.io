@@ -92,7 +92,7 @@ class UIUtils {
 
       child.disabled = true;
       child.setAttribute("data-resname", child.innerText);
-      child.innerText = "Loading... ";  // Extra space after ...
+      child.innerText += " ";  // Extra space after ...
 
       const spinner = document.createElement('span');
       spinner.className = 'spinner-border spinner-border-sm';
@@ -129,7 +129,7 @@ class UIUtils {
   }
 
 
-  static showAlert(alertNodeID, message, durSecs=3) {
+  static showAlert(alertNodeID, message, durSecs=5) {
     const parentDiv = document.getElementById(alertNodeID);
     const alert = document.createElement('div');
     alert.className = 'alert alert-warning alert-dismissible fade show';
@@ -821,7 +821,7 @@ LOT_SIZE = {
 };
 
 class StrategyLeg {
-  constructor(sym = null, exp, isBuy, qty, prc, stk = null, cepe = null) {
+  constructor(sym = null, exp, isBuy, qty, prc, stk = null, cepe = null, crtTm=null) {
 
     if (sym !== null) {
       if (sym.isIndex) {
@@ -835,7 +835,7 @@ class StrategyLeg {
     }
 
     this._id = "L" + Date.now().toString();
-    this._crtTime = Date.now();
+    this._crtTime = (crtTm) ? crtTm : Date.now();
     this._key = null;
     this._e = exp;        // in YYYYMMDD format (value of selector)
     this._s = stk;
@@ -867,10 +867,9 @@ class StrategyLeg {
   }
 
   copy() {
-    // All attributes are same except new id and create time
+    // All attributes are same except new id
     let newcopy = this.clone();
     newcopy._id = "L" + Date.now().toString();
-    newcopy._crtTime = Date.now();
 
     return newcopy;
   }
@@ -3098,7 +3097,7 @@ class DBFacade {
     if (data instanceof StrategyList) {
       let dataList = await db.fetchAllStrategies(globals.username);
       for (let i = 0; i < dataList.length; i++) {
-        data.add(StrategyCard.fromObject(dataList[i]));
+        data.add(Strategy.fromObject(dataList[i]));
       }
     }
 
