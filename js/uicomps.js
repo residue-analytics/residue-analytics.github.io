@@ -4,22 +4,58 @@ class TradingInstrument {
     this._sym = sym;
   }
 
+  async makeFuture(deferMonth=0) {
+    // Create a Future Instrument based on this instrument and its simulation Date
+    let futSym = globals.symbols.getLeaf(this.sym.a, "FUTURES", this.sym.c);
+    if (!futSym) {
+      return null;
+    }
+
+    await DBFacade.fetchLists(futSym);  // This will update the required data in sym
+    
+    let exp = futSym.getMonthlyExpiry(this.simulationDateYYYYMMDD, deferMonth);
+    if (exp) {
+      let futInst = new TradingInstrument(futSym);
+      futInst.exp = exp;
+      futInst.simulationTS = this.simulationTS;
+      return futInst;
+    }
+
+    return null;
+  }
+
+  async makeIndex(idx=this.sym.c) {
+    let idxSym = globals.symbols.getLeaf(this.sym.a, "INDEX", idx);
+    if (!idxSym) {
+      return null;
+    }
+
+    await DBFacade.fetchLists(idxSym);
+    
+    let idxInst = new TradingInstrument(idxSym);
+    idxInst.simulationTS = this.simulationTS;
+
+    return idxInst;
+  }
+
   get sym() {
     return this._sym;
   }
 
   set exp(val) {
     this._exp = val;
+    this._expDisp = val.substr(6, 2) + "-" + val.substr(4, 2) + "-" + val.substr(0, 4);
   }
-
-  get exp() {
+  get exp() {  // YYYYMMDD
     return this._exp;
+  }
+  get expDisplay() {
+    return this._expDisp
   }
 
   set stk(val) {
     this._stk = val;
   }
-
   get stk() {
     return this._stk;
   }
@@ -27,7 +63,6 @@ class TradingInstrument {
   set opt(val) {
     this._opt = val;
   }
-
   get opt() {
     return this._opt;
   }
@@ -43,10 +78,62 @@ class TradingInstrument {
   get isIndex() {
     return this.sym.b === "INDEX";
   }
+
+  set simulationTS(val) {
+    this._simDt = val;
+  }
+  get simulationTS() {
+    return this._simDt;  // Number 
+  }
+  get simulationDate() {
+    return new Date(this._simDt);
+  }
+  get simulationDateYYYYMMDD() {  // YYYYMMDD format (UTC)
+    let dt = this.simulationDate;
+    return dt.getUTCFullYear().toString() + ((dt.getUTCMonth() < 9) ? '0' + (dt.getUTCMonth() + 1) : (dt.getUTCMonth() + 1).toString()) + ((dt.getUTCDate() < 10) ? '0' + dt.getUTCDate() : dt.getUTCDate().toString());
+  }
+
+  isSame(other) {
+    if (this.sym === other.sym) {  // No need to compare a, b & c. sym are global
+      if (this.isIndex) {
+        return true;
+      }
+      if (this.exp === other.exp) {
+        if (this.isFuture) {
+          return true;
+        }
+        if (this.stk === other.stk && this.opt === other.opt) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+}
+
+class Trade {
+  constructor(instrument, tod, isBuy, qty, prc) {
+    this.inst = instrument;
+    this.tod = tod;
+    this.isBuy = isBuy;
+    this.isSell = !this.isBuy;
+    this.qty = qty;
+    this.prc = prc;
+
+    let dateObj = new Date(tod);
+    this.day = dateObj.getFullYear().toString();
+    this.day += (dateObj.getMonth() < 9) ? '0' + (dateObj.getMonth() + 1) : "" + (dateObj.getMonth() + 1);
+    this.day += (dateObj.getDate() < 10) ? '0' + dateObj.getDate() : "" + dateObj.getDate();
+
+    console.log(`Trade Day [${this.day}] Time [${this.tod}]`);
+  }
 }
 
 class ResDataSelector {
-  constructor(excID, instID, undID, expID, stkID, cepeID, daysID, dateSliderID, timeSliderID, errID, dataRefreshCallback) {
+  constructor(excID, instID, undID, expID, stkID, cepeID, daysID, dateSliderID, 
+    timeSliderID, errID, dataRefreshCallback, disablePageCallback, enablePageCallback) {
+    
     this.excID = excID;
     this.instID = instID;
     this.undID = undID;
@@ -58,6 +145,8 @@ class ResDataSelector {
     this.timeSliderID = timeSliderID;
     this.errID = errID;
     this.callback = dataRefreshCallback;
+    this.disableCallback = disablePageCallback;
+    this.enableCallback = enablePageCallback;
     this.cacheSyms = null;
 
     this.init();
@@ -88,8 +177,11 @@ class ResDataSelector {
         from: 0,   // initDates.indexOf("2021-01-01")
         //to: 2,   // initDates.indexOf("2021-01-03")
         force_edges: true,
-        onFinish: this.callback
+        onFinish: (data) => { this.fetchRecords(); },
+        onUpdate: (data) => { this.fetchRecords(); }
       });
+
+      this.dateSlider = $(this.dateSliderEl).data('ionRangeSlider');
     }
 
     $(this.timeSliderEl).ionRangeSlider({
@@ -102,8 +194,11 @@ class ResDataSelector {
       //to: UIUtils.dateToTS(new Date("2021-01-01T13:00:00+05:30")),
       force_edges: true,
       prettify: UIUtils.tsToDate,
-      onFinish: this.callback
+      onFinish: (data) => { this.fetchRecords(data); },
+      onUpdate: (data) => { this.fetchRecords(data); }
     });
+
+    this.timeSlider = $(this.timeSliderEl).data('ionRangeSlider');
 
     this.setupEventHandlers();
   }
@@ -118,64 +213,140 @@ class ResDataSelector {
 
   setupEventHandlers() {
     this.excEl.addEventListener('change', ev => this.loadInstruments(ev));
+    this.excEl.addEventListener('update-sel', ev => this.loadInstruments(ev));
 
     this.instEl.addEventListener('change', ev => this.loadUnderlying(ev));
+    this.instEl.addEventListener('update-sel', ev => this.loadUnderlying(ev));
 
     this.undEl.addEventListener('change', ev => this.loadExpiries(ev));
     this.undEl.addEventListener('change', ev => this.loadDays(ev));
+    this.undEl.addEventListener('update-sel', ev => this.loadExpiries(ev));
+    this.undEl.addEventListener('update-sel', ev => this.loadDays(ev));
 
     this.expEl.addEventListener('change', ev => this.loadStrikes(ev));
     this.expEl.addEventListener('change', ev => this.loadDays(ev));
+    this.expEl.addEventListener('update-sel', ev => this.loadStrikes(ev));
+    this.expEl.addEventListener('update-sel', ev => this.loadDays(ev));
+
+    this.stkEl.addEventListener('change', ev => this.updateDatetimeSlider(ev));
+    this.cepeEl.addEventListener('change', ev => this.updateDatetimeSlider(ev));
+    this.stkEl.addEventListener('update-sel', ev => this.updateDatetimeSlider(ev));
+    this.cepeEl.addEventListener('update-sel', ev => this.updateDatetimeSlider(ev));
 
     this.daysEl.addEventListener('change', ev => this.updateDatetimeSlider(ev));
+    this.daysEl.addEventListener('update-sel', ev => this.updateDatetimeSlider(ev));
   }
 
-  loadExchanges() {
-    
+  loadExchanges(trade=null) {
+    this.disableCallback();
     UIUtils.addSpinner(this.excID);
     UIUtils.updSelectDropdown(this.excID, this.cacheSyms.getAs());
+ 
+    // This event will be processed synchronously, as it's raised within another event handler.
+    //   listeners on excEl will be processed completely before this method completes.
+    if (trade) {
+      let instrument = trade;
+      if (trade instanceof Trade) {
+        instrument = trade.inst;
+      }
+      if (trade instanceof TradingInstrument) {
+        trade = null;
+      }
+
+      this.excEl.value = instrument.sym.a;
+      this.excEl.dispatchEvent(new CustomEvent("update-sel", {
+        detail: { "trade": trade, "instrument": instrument }
+      }));
+    } else {
+      this.excEl.dispatchEvent(new CustomEvent("update-sel", {
+        detail: { "trade": null, "instrument": null }
+      }));
+    }
+
     UIUtils.rmSpinner(this.excID);
-    this.excEl.dispatchEvent(new Event("change"));
   }
 
   loadInstruments(event) {
-
+    this.disableCallback();
     UIUtils.addSpinner(this.instID);
     UIUtils.updSelectDropdown(this.instID, this.cacheSyms.getBs(this.excEl.value));
+    
+    // Rather than checking the event.type (change or update-sel), we check the detail attr
+    //   which will be present only in CustomEvent when raised through updateSelectors()
+    if (event.detail && event.detail.instrument) {
+      this.instEl.value = event.detail.instrument.sym.b;
+      this.instEl.dispatchEvent(new CustomEvent("update-sel", {
+        detail: event.detail
+      }));
+    } else {
+      this.instEl.dispatchEvent(new CustomEvent("update-sel", {
+        detail: { trade: null, instrument: null }
+      }));
+    }
     UIUtils.rmSpinner(this.instID);
-    this.instEl.dispatchEvent(new Event("change"));
   }
 
   loadUnderlying(event) {
-
+    this.disableCallback();
     UIUtils.addSpinner(this.undID);
     UIUtils.updSelectDropdown(this.undID, Array.from(this.cacheSyms.getCs(this.excEl.value, this.instEl.value), val => val.c));
+    
+    if (event.detail && event.detail.instrument) {
+      this.undEl.value = event.detail.instrument.sym.c;
+      this.undEl.dispatchEvent(new CustomEvent("update-sel", {
+        detail: event.detail
+      }));
+    } else {
+      this.undEl.dispatchEvent(new CustomEvent("update-sel", {
+        detail: { trade: null, instrument: null }
+      }));
+    }
+    
     UIUtils.rmSpinner(this.undID);
-    this.undEl.dispatchEvent(new Event("change"));
   }
 
   loadExpiries(event) {
     if (event.target === this.undEl) {
       if (this.instEl.value !== "INDEX") {  // Load for both Options and Futures
+        this.disableCallback();
         UIUtils.addSpinner(this.expID);
         let leaf = this.cacheSyms.getLeaf(this.excEl.value, this.instEl.value, this.undEl.value);
         
         DBFacade.fetchLists(leaf).then(data => {
+          if (data.exps) {
+            UIUtils.updSelectDropdown(this.expID, data.exps, true);
+            if (event.detail && event.detail.instrument) {
+              this.expEl.value = event.detail.instrument.exp;
+              this.expEl.dispatchEvent(new CustomEvent("update-sel", {
+                detail: event.detail
+              }));
+            } else {
+              this.expEl.dispatchEvent(new CustomEvent("update-sel", {
+                detail: { trade: null, instrument: null }
+              }));
+            }
+          }
+
           if (data.days) {
             UIUtils.updSelectDropdown(this.daysID, data.days, true);
             //UIUtils.updateDatetimeSlider(this.sliderID, this.daysID, true);  //singleThumb fixed?
-            this.daysEl.dispatchEvent(new Event("change"));
+            if (event.detail && event.detail.trade) {
+              this.daysEl.value = event.detail.trade.day;
+              this.daysEl.dispatchEvent(new CustomEvent("update-sel", {
+                detail: event.detail
+              }));
+            } else {
+              this.daysEl.dispatchEvent(new CustomEvent("update-sel", {
+                detail: { trade: null, instrument: null }
+              }));
+            }
           }
-          if (data.exps) {
-            UIUtils.updSelectDropdown(this.expID, data.exps, true);
-            this.expEl.dispatchEvent(new Event("change"));
-          }
-          
+
           UIUtils.rmSpinner(this.expID);
         }).catch(error => {
           console.log("Error fetching expiries : " + error);
-          UIUtils.rmSpinner(this.expID);
           UIUtils.showAlert(this.errID, error);
+          UIUtils.rmSpinner(this.expID);
         });
       } else {
         console.log("Exp: Ignore this change");
@@ -185,23 +356,48 @@ class ResDataSelector {
 
   loadStrikes(event) {
     if (this.instEl.value === "OPTIONS") {
+      this.disableCallback();
       UIUtils.addSpinner(this.stkID);
       let leaf = this.cacheSyms.getLeaf(this.excEl.value, this.instEl.value, this.undEl.value);
 
       DBFacade.fetchLists(leaf, this.expEl.value).then(data => {
-        if (data.days) {
-          UIUtils.updSelectDropdown(this.daysID, data.days, true);
-          this.daysEl.dispatchEvent(new Event("change"));
-        }
+        // Strikes to be loaded first, on loading days first the fetchRecs() gets triggered
+        //   before strikes are fully loaded.
         if (data.stks) {
           UIUtils.updSelectDropdown(this.stkID, data.stks, false);
-          this.stkEl.dispatchEvent(new Event("change"));
+          // Not raising event as it generates duplicate calls to backend
+          //this.stkEl.dispatchEvent(new Event("change"));
+          if (event.detail && event.detail.instrument) {
+            this.stkEl.value = event.detail.instrument.stk;
+          }
+
+          UIUtils.updSelectDropdown(this.cepeID, ["CE", "PE"], false);
+          // Not raising event as it generates duplicate calls to backend
+          //this.cepeEl.dispatchEvent(new Event("change"));
+          if (event.detail && event.detail.instrument) {
+            this.cepeEl.value = event.detail.instrument.opt;
+          }
         }
+
+        if (data.days) {
+          UIUtils.updSelectDropdown(this.daysID, data.days, true);
+          if (event.detail && event.detail.trade) {
+            this.daysEl.value = event.detail.trade.day;
+            this.daysEl.dispatchEvent(new CustomEvent("update-sel", {
+              detail: event.detail
+            }));
+          } else {
+            this.daysEl.dispatchEvent(new CustomEvent("update-sel", {
+              detail: { trade: null, instrument: null }
+            }));
+          }
+        }
+
         UIUtils.rmSpinner(this.stkID);
       }).catch(error => {
         console.log("Error fetching strikes : " + error);
-        UIUtils.rmSpinner(this.stkID);
         UIUtils.showAlert(this.errID, error);
+        UIUtils.rmSpinner(this.stkID);
       });
     } else {
       console.log("Strikes are loaded only for Options");
@@ -211,6 +407,7 @@ class ResDataSelector {
   loadDays(event) {
     if (this.instEl.value === "INDEX" || this.instEl.value === "FUTURES") {
       // Load Days
+      this.disableCallback();
       UIUtils.addSpinner(this.daysID);
       let leaf = this.cacheSyms.getLeaf(this.excEl.value, this.instEl.value, this.undEl.value);
       let exp = null;
@@ -222,23 +419,124 @@ class ResDataSelector {
           return;
         }
       }
+
       DBFacade.fetchLists(leaf, exp).then(data => {
         if (data.days) {
           UIUtils.updSelectDropdown(this.daysID, data.days, true);
           //UIUtils.updateDatetimeSlider(this.sliderID, this.daysID, true);  // SingleThumb?
-          this.daysEl.dispatchEvent(new Event("change"));
+          if (event.detail && event.detail.trade) {
+            this.daysEl.value = event.detail.trade.day;
+            this.daysEl.dispatchEvent(new CustomEvent("update-sel", {
+              detail: event.detail
+            }));
+          } else {
+            this.daysEl.dispatchEvent(new CustomEvent("update-sel", {
+              detail: { trade: null, instrument: null }
+            }));
+          }
         }
+
         UIUtils.rmSpinner(this.daysID);
       }).catch(error => {
         console.log("Error fetching days : " + error);
-        UIUtils.rmSpinner(this.daysID);
         UIUtils.showAlert(this.errID, error);
+        UIUtils.rmSpinner(this.daysID);
       });
     } else {
-      console.log("Days: Ignore this change");
+      //console.log("Days: Ignore this change");
     }
 
     this.disableUnwanted();
+  }
+
+  updateDatetimeSlider(event) {
+    console.log("Triggered date time slider update");
+    this.disableCallback();  // Disable the Page interactions, enable only after fetchRecs
+
+    if (this.dateSlider) {
+      //let dateRangeSlider = $(this.dateSliderEl).data('ionRangeSlider');
+      let dateRange = [];
+      let options = this.daysEl.options;
+      let fromIdx = 0;
+      for (let i = 0; i < options.length; i++) {
+        dateRange.push(options[i].label);
+        if (event.detail && event.detail.trade && options[i].value == event.detail.trade.day) {
+          fromIdx = i;
+        }
+      }
+      
+      this.dateSlider.update({
+        from: fromIdx,
+        values: dateRange
+      });
+    }
+
+    //let timeRangeSlider = $(this.timeSliderEl).data('ionRangeSlider');
+    const date = this.daysEl.value.substr(0, 4) + "-" + this.daysEl.value.substr(4, 2) + "-" + this.daysEl.value.substr(6, 2);
+
+    let fromVal = UIUtils.dateToTS(new Date(date + UIUtils.DAY_MID));
+    if (event.detail && event.detail.trade) {
+      fromVal = event.detail.trade.tod;
+    }
+
+    this.timeSlider.update({
+      min: UIUtils.dateToTS(new Date(date + UIUtils.DAY_START)),
+      max: UIUtils.dateToTS(new Date(date + UIUtils.DAY_END)),
+      from: fromVal
+    });
+  }
+
+  updateSelectors(record) {
+    // Set the values of the dropdowns as given record (Instrument or Trade)
+    this.loadExchanges(record);  // This will cascading trigger listeners for all
+  }
+
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async cacheAllSelectors() {
+    while (this.cacheSyms === null) {
+      // We wait for cacheSyms to get set
+      await this.sleep(1000);
+    }
+    
+    // We assume that the fetchSymbols() is complete by now
+    for (let a of this.cacheSyms.getAs()) {
+      for (let b of this.cacheSyms.getBs(a)) {
+        for (let leaf of this.cacheSyms.getCs(a, b)) {
+          await DBFacade.fetchLists(leaf);
+          if (!leaf.isIndex) {
+            for (let exp of leaf.expiries) {
+              //await DBFacade.fetchLists(leaf, exp);
+              DBFacade.fetchLists(leaf, exp);  // Trigger fetch, no await-ing!!?
+            }
+          }
+        }
+      }
+    }
+
+    return this.cacheSyms;
+  }
+
+  fetchRecords(dataORevent) {  // data when call is from the slider, event when from event listener
+    console.log("selector fetchrecs");
+    this.disableCallback();  // Disable the Page interactions
+
+    DBFacade.fetchRecs(this.excEl.value, this.instEl.value, this.undEl.value,
+      this.expEl.value, Math.floor(this.timeSlider.result.from / 60000) * 60, 
+      this.stkEl.value, this.cepeEl.value, null, null)
+      .then(response => { 
+        this.callback(response);
+        console.log("selector fetchrecs success");
+        this.enableCallback();  // Enable the Page interactions
+      } )
+      .catch(error => { 
+        console.log(error);
+        this.callback(error);
+        console.log("selector fetchrecs failure");
+        this.enableCallback();  // Enable the Page interactions
+      });
   }
 
   get instrument() {
@@ -248,11 +546,24 @@ class ResDataSelector {
       inst.exp = this.expEl.value;
     }
     if (inst.isOption) {
+      inst.exp = this.expEl.value;
       inst.stk = this.stkEl.value;
       inst.opt = this.cepeEl.value;
     }
     
+    inst.simulationTS = this.timeSliderVal;
+
     return inst;
+  }
+
+  get timeSliderVal() {
+    // Value at the Time Slider's thumb in msec
+    return this.timeSlider.result.from;
+  }
+  set timeSliderVal(val) {
+    this.timeSlider.update({
+      from: val
+    });
   }
 
   disableUnwanted() {
@@ -273,59 +584,6 @@ class ResDataSelector {
       this.cepeEl.disabled = false;
       this.daysEl.disabled = false;
     }
-  }
-
-  updateDatetimeSlider(event) {
-    if (this.dateSliderEl) {
-      let dateRangeSlider = $(this.dateSliderEl).data('ionRangeSlider');
-      let dateRange = [];
-      for (let option of this.daysEl.options) {
-        dateRange.push(option.text)
-      }
-      
-      dateRangeSlider.update({
-        from: 0,
-        values: dateRange
-      });
-    }
-
-    let timeRangeSlider = $(this.timeSliderEl).data('ionRangeSlider');
-    const date = this.daysEl.value.substr(0, 4) + "-" + this.daysEl.value.substr(4, 2) + "-" + this.daysEl.value.substr(6, 2);
-
-    timeRangeSlider.update({
-      min: UIUtils.dateToTS(new Date(date + UIUtils.DAY_START)),
-      max: UIUtils.dateToTS(new Date(date + UIUtils.DAY_END)),
-      from: UIUtils.dateToTS(new Date(date + UIUtils.DAY_MID))
-    });
-
-    this.callback();
-  }
-
-  sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  async cacheAllSelectors() {
-    while (this.cacheSyms === null) {
-      // We wait for cacheSyms to get set
-      await this.sleep(1000);
-    }
-    
-    // We assume that the fetchSymbols() is complete by now
-    for (let a of this.cacheSyms.getAs()) {
-      for (let b of this.cacheSyms.getBs(a)) {
-        for (let leaf of this.cacheSyms.getCs(a, b)) {
-          await DBFacade.fetchLists(leaf);
-          if (!leaf.isIndex) {
-            for (let exp of leaf.expiries) {
-              await DBFacade.fetchLists(leaf, exp);  // Trigger fetch, no await-ing!!?
-            }
-          }
-        }
-      }
-    }
-
-    return this.cacheSyms;
   }
 }
 
@@ -596,7 +854,7 @@ class StrategyCard extends Strategy {
   constructor(name, stg=null) {
     
     super(name);
-    throw Error("Cannot use StrategyCard");
+    throw new Error("Cannot use StrategyCard");
 
     //console.log(`Creating Card [${name}] ${ (stg) ? "with stg" : "without stg"}`);
     this._fullCardParentJNode = null;
@@ -837,12 +1095,12 @@ class StrategyFullCardElement extends HTMLDivElement {
       let row = `<tr>
       <th scope="row">${(i + 1).toString()}</th>
       <td> ${leg.key}</td>
-      <td> ${new Date(leg.createTime).toLocaleString()}</td>
+      <td> ${new Date(leg.createTime).toLocaleString("en-IN")}</td>
       <td>${leg.isBuy ? "Buy" : "Sell"}</td>
-      <td>${leg.isBuy ? "" : "-"}${leg.tqty.toString()}</td>
+      <td>${(leg.isBuy || leg.lots === 0) ? "" : "-"}${leg.tqty.toString()}</td>
       <td>${leg.entryPrice.toFixed(2)}</td>
       <td>${leg.curPrice.toFixed(2)}</td>
-      <td>${leg.extPrice > 0 ? leg.extPrice.toFixed(2) : ""}</td>
+      <td>${leg.exitPrice > 0 ? leg.exitPrice.toFixed(2) : ""}</td>
       <td class=${leg.curPosition >= 0 ? "text-success" : "text-danger"}>${leg.curPosition.toFixed(2)}</td>
       <td>
         <a class="bi-trash text-danger" href="#/" aria-label="Remove" 
@@ -869,7 +1127,7 @@ class StrategyFullCardElement extends HTMLDivElement {
     <td></td> 
     <td></td> 
     <td></td> 
-    <td>0</td>
+    <td>${stg.curPosition.toFixed(2)}</td>
     <td></td>
     </tr>`;
 
@@ -904,7 +1162,7 @@ class StrategyFullCardElement extends HTMLDivElement {
           <div class="tab-pane fade show active" id="legs${stg.id}" role="tabpanel" 
             aria-labelledby="legs-tab${stg.id}"> 
             <div class="table-responsive"> 
-              <table class="table table-sm mb-0"> 
+              <table class="table table-sm table-hover mb-0"> 
                 <thead>
                   <tr> 
                     <th scope="col">#</th> 
@@ -930,7 +1188,8 @@ class StrategyFullCardElement extends HTMLDivElement {
             aria-labelledby="other-tab${stg.id}"> Other </div> 
         </div> 
         <div class="card-footer text-muted"> 
-          <small>Created On: ${new Date(stg.createTime).toLocaleString()}</small> 
+          <small>Created : ${new Date(stg.createTime).toLocaleString("en-IN")}, 
+                 Last Updated : ${new Date(stg.lastUpdateTime).toLocaleString("en-IN")}</small> 
           <a href="#/" class="me-2 bi-save-fill text-success float-end" 
             onclick=" this.dispatchEvent(new CustomEvent('savstg', {
               bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
@@ -949,17 +1208,17 @@ class StrategyFullCardElement extends HTMLDivElement {
   connectedCallback() {
     // browser calls this method when the element is added to the document
     // (can be called many times if an element is repeatedly added/removed)
-    console.log("connected");
+    //console.log("connected");
   }
 
   disconnectedCallback() {
     // browser calls this method when the element is removed from the document
     // (can be called many times if an element is repeatedly added/removed)
-    console.log("disconnected");
+    //console.log("disconnected");
   }
 
   static get observedAttributes() {
-    return ["stgid"];  /* array of attribute names to monitor for changes */
+    return [];  /* array of attribute names to monitor for changes */
   }
 
   attributeChangedCallback(name, oldValue, newValue) {
@@ -981,8 +1240,10 @@ class StrategyValueCardElementList extends HTMLDivElement {
   }
 
   updateCards(stgList=null) {
-    let jqThis = $(this);
-    jqThis.empty();
+
+    while (this.firstChild) {
+      this.removeChild(this.firstChild)
+    }
 
     // First child is a null child which lets users to create new strategies/cards
     this.appendChild( new StrategyValueCardElement(null) );
@@ -1078,7 +1339,7 @@ class StrategyValueCardElement extends HTMLDivElement {
       </div>`;
     }
 
-    let value = stg.curValue.toFixed(2);
+    let value = stg.curPosition.toFixed(2);
     this.id = stg.id;
 
     return `
@@ -1099,8 +1360,8 @@ class StrategyValueCardElement extends HTMLDivElement {
           <h5 class="card-title text-${value >= 0 ? "success" : "danger"}">${value}</h5>
           <span>${stg.count.toString()} Legs</span>
         </div> 
-        <div class="card-footer text-muted"> 
-          <small> Created: ${new Date(stg.createTime).toLocaleString()}</small> 
+        <div class="card-footer text-center text-muted"> 
+          <small>${new Date(stg.createTime).toLocaleString("en-IN")}</small> 
         </div> 
       </div>`;
   }
@@ -1131,6 +1392,233 @@ class StrategyValueCardElement extends HTMLDivElement {
   // there can be other element methods and properties
 }
 customElements.define("strategy-card", StrategyValueCardElement, {extends: 'div'});
+
+class FuturesWatchCardElement extends HTMLDivElement {
+  constructor(instrument) {
+    super();
+    
+    if (!instrument.isFuture) {
+      throw new Error(`Future Watch Card for [${instrument.sym.b}]!!`)
+    }
+
+    this.instrument = instrument;
+    this.ltp = "NA";
+    this.ltpdir = 0; // direction of ltp -ve (down), =ve (up), 0 (same)
+    this.oi = "NA";
+    this.className = 'col';
+    this.innerHTML = this._getCard();
+    
+    this.update().catch(() => console.log("Unable to initial update the Futures Card") );
+  }
+
+  _getCard() {
+    return `
+        <div class="card shadow-sm mb-3">
+          <div class="card-header">
+            <span>${this.instrument.sym.c} ${this.instrument.expDisplay}
+            <span class="float-end text-danger align-bottom"><small>FUT</small></span>
+            </span>
+          </div> 
+          <div class="card-body">
+            <div class="card-text">
+              <div>OI : ${this.oi}</div>
+              <div>LTP : 
+                <span class=${this.ltpdir <= 0 ? (this.ltpdir < 0 ? "text-danger" : "") : "text-success"}>
+                ${this.ltp}</span>
+              </div>
+            </div>
+          </div>
+        </div>`;
+  }
+
+  async update(newTS=null) {
+    if (newTS) {
+      this.instrument.simulationTS = newTS;
+    }
+
+    try {
+      const resultList = await this.fetchRec(this.instrument);
+      const one = resultList.one;
+      let ltp = one.ltp;
+      if (ltp) {
+        ltp = ltp.toFixed(2);
+        this.ltpdir = ltp - this.ltp;
+        this.ltp = ltp;
+      }
+      if (one.oi) {
+        this.oi = one.oi;
+      }
+
+      this.innerHTML = this._getCard();
+    } catch(error) {
+      console.log(error);
+      throw error;
+    }
+  }
+
+  async fetchRec(instrument) {
+    const sym = instrument.sym;
+    return await DBFacade.fetchRecs(sym.a, sym.b, sym.c,
+    instrument.exp, Math.floor(instrument.simulationTS / 60000) * 60, null, null, null, null);
+  }
+}
+customElements.define("futures-card", FuturesWatchCardElement, {extends: 'div'});
+
+class IndexWatchCardElement extends HTMLDivElement {
+  constructor(instrument) {
+    super();
+    
+    if (!instrument.isIndex) {
+      throw new Error(`Index Watch Card for [${instrument.sym.b}]!!`)
+    }
+
+    this.instrument = instrument;
+    this.ltp = "NA";
+    this.ltpdir = 0; // direction of ltp -ve (down), =ve (up), 0 (same)
+    this.className = 'col';
+    this.innerHTML = this._getCard();
+    
+    this.update().catch(() => console.log("Unable to initial update the Index Card") );
+  }
+
+  _getCard() {
+    return `
+        <div class="card shadow-sm mb-3">
+          <div class="card-header">
+            <span>${this.instrument.sym.c}
+            </span>
+            <span class="float-end text-danger align-bottom"><small>IDX</small></span>
+          </div> 
+          <div class="card-body">
+            <div class="card-text">
+              <div>IDX : 
+                <span class=${this.ltpdir <= 0 ? (this.ltpdir < 0 ? "text-danger" : "") : "text-success"}>${this.ltp}</span>
+              </div>
+              <div>&nbsp;</div>
+            </div>
+          </div>
+        </div>`;
+  }
+
+  async update(newTS=null) {
+    if (newTS) {
+      this.instrument.simulationTS = newTS;
+    }
+
+    try {
+      const resultList = await this.fetchRec(this.instrument);
+      const one = resultList.one;
+      let ltp = one.ltp;
+      if (ltp) {
+        ltp = ltp.toFixed(2);
+        this.ltpdir = ltp - this.ltp;
+        this.ltp = ltp;
+      }
+      
+      this.innerHTML = this._getCard();
+    } catch(error) {
+      console.log(error);
+      throw error;
+    }
+  }
+
+  async fetchRec(instrument) {
+    const sym = instrument.sym;
+    return await DBFacade.fetchRecs(sym.a, sym.b, sym.c, null,
+      Math.floor(instrument.simulationTS / 60000) * 60, null, null, null, null);
+  }
+}
+customElements.define("index-card", IndexWatchCardElement, {extends: 'div'});
+
+class FuturesAndIndexCardsElement extends HTMLDivElement {
+  constructor() {
+    super();
+  }
+
+  getCard(instrument) {
+    for (let i = 0; i < this.children.length; i++) {
+      if (this.children[i].instrument && instrument.isSame(this.children[i].instrument)) {
+        return this.children[i];
+      }
+    }
+
+    return null;
+  }
+  
+  has(instrument) {
+    for (let i = 0; i < this.children.length; i++) {
+      if (this.children[i].instrument && instrument.isSame(this.children[i].instrument)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  append(instrument) {
+    if (!instrument) {
+      console.log("No instrument to make Card");
+      return;
+    }
+
+    let card = this.getCard(instrument);
+    if (card) {
+      card.update(instrument.simulationTS);
+      return;
+    }
+
+    if (instrument.isFuture) {
+      card = new FuturesWatchCardElement(instrument);
+    } else if (instrument.isIndex) {
+      card = new IndexWatchCardElement(instrument);
+    } else {
+      throw new Error("Unsupported type of instrument for Watch List");
+    }
+
+    this.appendChild(card);
+  }
+  
+  remove(instrument) {
+    let card = this.getCard(instrument);
+    this.removeChild(card);
+  }
+
+  clear() {
+    while (this.firstChild) {
+      this.removeChild(this.firstChild)
+    }
+  }
+
+  updateAll(newTS) {
+    for (let i = 0; i < this.children.length; i++) {
+      this.children[i].update(newTS);
+    }
+  }
+
+  connectedCallback() {
+    // browser calls this method when the element is added to the document
+    // (can be called many times if an element is repeatedly added/removed)
+  }
+
+  disconnectedCallback() {
+    // browser calls this method when the element is removed from the document
+    // (can be called many times if an element is repeatedly added/removed)
+  }
+
+  static get observedAttributes() {
+    return [/* array of attribute names to monitor for changes */];
+  }
+
+  attributeChangedCallback(name, oldValue, newValue) {
+    // called when one of attributes listed above is modified
+  }
+
+  adoptedCallback() {
+    // called when the element is moved to a new document
+    // (happens in document.adoptNode, very rarely used)
+  }
+}
+customElements.define("x-data-cards", FuturesAndIndexCardsElement, {extends: 'div'});
 
 class OptionChainPresenter {
   constructor() {

@@ -83,13 +83,11 @@ class UIUtils {
     // nodeID is the node that is being updated currently
     // Spinner is added to the parent of this node
     const child = document.getElementById(nodeID);
-    let parent = null;
     if (child.type === "button") {
       if (child.disabled) {
         return;
       }
-      parent = child.parentElement;
-
+      
       child.disabled = true;
       child.setAttribute("data-resname", child.innerText);
       child.innerText += " ";  // Extra space after ...
@@ -101,9 +99,8 @@ class UIUtils {
 
       child.appendChild(spinner);
     } else {
-      UIUtils.updSelectDropdown(nodeID, [], false, "0", "Loading...");
       child.disabled = true;
-      parent = child.parentElement;
+      UIUtils.updSelectDropdown(nodeID, [], false, "0", "Loading...");
     }
   }
 
@@ -111,7 +108,6 @@ class UIUtils {
     const child = document.getElementById(nodeID);
     let parent = null;
     if (child.type === "button") {
-      child.disabled = false;
       child.innerText = child.getAttribute("data-resname");
       parent = child;
 
@@ -119,12 +115,12 @@ class UIUtils {
       if (spinner) {
         parent.removeChild(spinner);
       }
+      child.disabled = false;
     } else {
       if (child.options[0].text === "Loading...") {
         child.options.remove(0);
       }
       child.disabled = false;
-
     }
   }
 
@@ -580,6 +576,17 @@ class StrategyList {
     }
   }
 
+  async updatePrice(tmstmp, resolve, reject) {
+    // Initiate price update for all the strategies
+    if (this.count) {
+      for (let value of this._stgs.values()) {
+        await value.updatePrice( tmstmp, 
+          (pos) => {resolve(value, pos)}, 
+          (reasons) => {reject(value, reasons)} );
+      }
+    }
+  }
+
   async delete(stg) {
     let id = stg;
     if (stg instanceof Strategy) {  // Can be StrategyCard also (sub-class of Strategy)
@@ -624,19 +631,19 @@ class Strategy {
     this._crtTime = other._crtTime;
     this._lastUpdTime = other._lastUpdTime;
     this._legs = other._legs;
-    
-    // Nullify other (only legs is enough as other attributes are immutable)
+
+    // Nullify other (only legs and history is enough as other attributes are immutable)
     other._legs = null;
   }
 
-  clone() {
+  clone(history=false) {
     // All attributes are same
     let newobj = new Strategy(this._name);
     newobj._id = this._id;
     newobj._crtTime = this._crtTime;
     newobj._lastUpdTime = this._lastUpdTime;
     for (let i = 0; i < this._legs.length; i++) {
-      newobj._legs.push(this._legs[i].clone());
+      newobj._legs.push(this._legs[i].clone(history));
     }
 
     return newobj;
@@ -685,25 +692,22 @@ class Strategy {
     return stg;
   }
 
-  add(leg, settle = false) {
+  add(leg) {
     // Returns true when settled or added successfully
     for (let i = 0; i < this._legs.length; i++) {
       if (leg.matches(this._legs[i])) {
-        if (settle) {
-          if (this._legs[i].settleWith(leg)) {
-            return true;
-          } else {
-            console.log("Settlement failed");
-            return false;
-          }
+        if (this._legs[i].update(leg)) {
+          this._lastUpdTime = this._legs[i].lastUpdateTime;
+          return true;
         } else {
-          console.log("Match found, settlement not requested");
+          console.log("Settlement failed");
           return false;
         }
       }
     }
 
     this._legs.push(leg);
+    this._lastUpdTime = leg.lastUpdateTime;
 
     return true;
   }
@@ -726,7 +730,7 @@ class Strategy {
       }
     }
 
-    return (1 * total).toFixed(2);
+    return total;
   }
 
   get curValue() {
@@ -747,17 +751,14 @@ class Strategy {
     let total = 0;
 
     for (let i = 0; i < this._legs.length; i++) {
-      if (this._legs[i].isBuy) {
-        total -= this._legs[i].curPosition;
-      } else {
-        total += this._legs[i].curPosition;
-      }
+      total += this._legs[i].curPosition;
     }
 
     return total;
   }
 
   async updatePrice(tmstmp, resolve, reject) {
+    // resolve receives the current position (number) while reject receives reasons of failures (array)
     const promises = [];
     for (let i = 0; i < this._legs.length; i++) {
       promises.push(this._legs[i].updatePrice(tmstmp));
@@ -774,6 +775,8 @@ class Strategy {
           failure = true;
         }
       }
+
+      this._lastUpdTime = tmstmp;
 
       if (failure) {
         reject(reasons);
@@ -826,6 +829,25 @@ class Strategy {
   get legs() {
     return this._legs;
   }
+
+  get firstTrade() {
+    // Get the first trade that started this strategy
+    if (this.count) {
+      // Though we add legs in the sequence they are added but updates to a leg sometimes 
+      //   change their create time
+      let first = this.legs[0].firstTrade;
+      for (let i = 1; i < this.count; i++) {
+        let thisTrade = this.legs[i].firstTrade;
+        if (first.tod > thisTrade.tod) {
+          first = thisTrade;
+        }
+      }
+
+      return first;
+    }
+
+    return null;
+  }
 }
 
 LOT_SIZE = {
@@ -851,19 +873,23 @@ class StrategyLeg {
     this._id = "L" + Date.now().toString();
     this._crtTime = (crtTm) ? crtTm : Date.now();  // Traded On
     this._key = null;
-    this._e = exp;           // in YYYYMMDD format (value of selector)
+    this._e = exp;             // in YYYYMMDD format (value of selector)
     this._s = stk;
-    this._cp = cepe;         // "CE" or "PE"
-    this._buy = isBuy;       // If not BUY, it's a SELL
+    this._cp = cepe;           // "CE" or "PE"
+    this._buy = isBuy;         // If not BUY, it's a SELL
     this._prc = parseFloat(prc);   // Entry Price per share (needs to mul by lot size)
-    this._curPrc = 0;
-    this._q = parseInt(qty); // Lots
-    this._extPrc = 0;        // Exit Price, min value 0.05
-    this._lastUpdTm = null;
-    this._auditRecs = new Map();  // Changes made to this leg, tm -> clone of leg
+    this._curPrc = this._prc;  // Current Price assumed to be same as price of entry
+    this._q = parseInt(qty);   // Lots
+    this._extq = 0;            // Lots exited
+    this._extPrc = 0;          // Average Exit Price, min value 0.05
+    this._stlVal = 0;          // Cumulative settled value, can be negative (loss)
+    this._lastUpdTm = this._crtTime;
+
+    // Changes made to this leg, tm (when change was made) -> [old leg clone, new leg clone]
+    this._history = new Map();  
   }
 
-  clone() {
+  clone(history=false) {
     // All attributes are expected to be same in clone
     let newobj = new StrategyLeg(null, this._e, this._buy, this._q, this._prc,
       this._s, this._cp);
@@ -874,9 +900,17 @@ class StrategyLeg {
     newobj._c = this._c;
     newobj._isOpt = this._isOpt;
     newobj._curPrc = this._curPrc;
+    newobj._extq = this._extq;
     newobj._extPrc = this._extPrc;
+    newobj._stlVal = this._stlVal;
     newobj._lastUpdTm = this._lastUpdTm;
-    // We do not clone audit records, as cloned records are added to audit records (will create circular reference)
+
+    // We do not clone hisotry, as cloned records are added to history (which will create circular reference)
+    if (history) {
+      for (let [tm, legs] of this._history) {
+        newobj._history.set( tm, [legs[0].clone(false), legs[1].clone(false)] );
+      }
+    }
 
     return newobj;
   }
@@ -890,13 +924,21 @@ class StrategyLeg {
   }
 
   toObject() {
+    let hist = {};
+    if (this._history.size > 0) {
+      for (let [tm, legs] of this._history) {
+        hist[tm] = [legs[0].toObject(), legs[1].toObject()];
+      }
+    }
+
     // Not taking key (can be recreated based on abc)
     return {
       a : this._a, b : this._b, c : this._c,
-      cp : this._cp, ct : this._crtTime, e : this._e, 
+      cp : this._cp, ct : this._crtTime, e : this._e, h : hist,
       id : this._id, io : this._isOpt, l : this._lastUpdTm,
       p : this._prc, q : this._q, r : this._curPrc,
-      s : this._s, x: this._extPrc, y : this._buy
+      s : this._s, t : this._stlVal, x : this._extPrc, xq : this._extq,
+      y : this._buy
     };
   }
 
@@ -908,12 +950,21 @@ class StrategyLeg {
     newobj._b = obj.b;
     newobj._c = obj.c;
     newobj._isOpt = obj.io;
+
+    if (obj.h) {
+      for (const prop in obj.h) {
+        newobj._history.set(prop, [ StrategyLeg.fromObject(obj.h[prop][0]), 
+                                    StrategyLeg.fromObject(obj.h[prop][1]) ]);
+      }
+    }
     if (obj.r) {
       newobj._curPrc = parseFloat(obj.r);
     }
     if (obj.x) {
       newobj._extPrc = parseFloat(obj.x);
+      newobj._extq = parseInt(obj.xq);
     }
+    newobj._stlVal = parseFloat(obj.t);
     newobj._lastUpdTm = obj.l;
 
     return newobj;
@@ -929,21 +980,58 @@ class StrategyLeg {
     return false;
   }
 
-  update(leg) {
-    // To Do
-    // Returns true if settlement done else false (no change made)
-    if (this.isClosed) {
-      return false;
-    }
+  _updExit(qty, price) {
+    // this & leg are opposite trades, settlement being done
+    let prevExtVal = this.exitLots * this.exitPrice;
+    this._extq += qty;
+    this._extPrc = (prevExtVal + qty * price) / this._extq;
+  }
 
-    if (this.matches(leg) && this.isBuy !== leg.isBuy) {
-      this._stllegs.push(leg);
-      if (this.lots === leg.lots) {
-        this._open = false;
+  update(leg) {
+    // Returns true if settlement done else false (no change made)
+    if (this.matches(leg)) {
+      this._history.set(leg._crtTime, [this.clone(), leg.clone()]);
+      this._crtTime = leg._crtTime;  // As this is really a new leg with new qty and prc, old legs are in history
+      this._lastUpdTm = leg._lastUpdTm;
+
+      if (this.isBuy === leg.isBuy) {
+        // Both are same, so quantity would increase and entry price will average out
+        this._q += leg._q;
+        this._prc = (this.entryValue + leg.entryValue)/(this.tqty + leg.tqty);
+      } else {
+        // An opposite trade, settlement needed
+        if (this.lots === leg.lots) {
+          // Fully settled
+          this._stlVal += ((this.isBuy) ? leg.entryValue - this.entryValue 
+                                        : this.entryValue - leg.entryValue );
+          this._q = 0;
+          this._updExit(leg.lots, leg.entryPrice);
+        } else if (this.lots > leg.lots) {
+          // Partially settled
+          this._stlVal += ( (this.isBuy) ? leg.entryValue - (leg.tqty * this.entryPrice) 
+                                         : (leg.tqty * this.entryPrice) - leg.entryValue );
+          this._q = this.lots - leg.lots;
+          this._updExit(leg.lots, leg.entryPrice);
+        } else if (this.lots === 0) {
+          // Starting again on already fully settled leg
+          this._q = leg.lots;
+          this._prc = leg._prc;
+          this._buy = leg._buy;
+        } else {
+          // Changing the buy/sell direction of this leg
+          this._stlVal += ( (this.isBuy) ? (this.tqty * leg.entryPrice) - this.entryValue 
+                                         : this.entryValue - (this.tqty * leg.entryPrice) );
+          this._q = leg.lots - this.lots;
+          this._prc = leg._prc;
+          this._buy = leg._buy;
+          this._updExit(this.lots, leg.entryPrice);
+        }
       }
     } else {
       return false;
     }
+
+    return true;
   }
 
   async updatePrice(tmstmp=null) {
@@ -951,8 +1039,16 @@ class StrategyLeg {
       tmstmp = Date.now();
     }
     
+    if (this.createTime > tmstmp) {
+      // This leg is created after the requested price update, so this price update should not
+      //   have any effect on the P&L of this leg. We skip this update.
+      console.log("Skipping this update price request");
+      return this;
+    }
+
     let resList = await this.getRecord(tmstmp);
-    this.curPrice = resList.one.ltp;  // setter will call this.updatedNow()
+    this.curPrice = resList.one.ltp;  // setter will call this.updatedNow() which is not right
+    this._lastUpdTm = tmstmp;
 
     return this;  // return self to aid the callbacks
   }
@@ -973,8 +1069,9 @@ class StrategyLeg {
   }
 
   get curValue() {
-    if (this.extPrice > 0) {  // As this leg has been exited, value is now fixed
-      return this.tqty * this.extPrice;
+    // Current Value of this contract in the market (not considering settled value)
+    if (this.lots === 0) {  // As this leg has been exited
+      return 0;
     }
 
     if (!this.curPrice) {
@@ -985,8 +1082,14 @@ class StrategyLeg {
   }
 
   get curPosition() {
-    // Position shows this legs P&L wrt entryPrice & curPrice/extPrice (must be updated before calling)
-    return this.isBuy ? (this.curValue - this.entryValue) : (this.entryValue - this.curValue);
+    // Position shows this legs P&L wrt already settled quantity, entryPrice, exitPrice & 
+    //   curPrice (must be updated before calling)
+    if (this.lots === 0) {
+      return this.settledValue;
+    }
+
+    return this.isBuy ? (this.curValue - this.entryValue + this.settledValue) : 
+                        (this.entryValue - this.curValue + this.settledValue);
   }
 
   get key() {
@@ -1004,7 +1107,35 @@ class StrategyLeg {
     return this._key;
   }
 
+  get firstTrade() {
+    if (this.histCount === 0) {
+      return this.trade;
+    } else {
+      for (let [key, values] of this._history) {
+        // JS Map object iterates in same sequence as added to
+        return values[0].trade;
+      }
+    }
+  }
 
+  get allTrades() {
+    // Returns an array of Trades in the sequence they were added/updated (traded)
+    let result = [];
+    if (this.histCount === 0) {
+      result.append(this.trade);
+    } else {
+      for (let [key, values] of this._history) {
+        // JS Map object iterates in same sequence as added to
+        if (result.length === 0) {
+          // First record, we pick-up both the legs from value
+          result.append(values[0].trade);
+        }
+        result.append(values[1].trade);
+      }
+    }
+    
+    return result;
+  }
   // Straight forward data
 
   get id() {
@@ -1026,6 +1157,24 @@ class StrategyLeg {
 
   get isFuture() {
     return !this.isOption;
+  }
+
+  get instrument() {
+    let inst = new TradingInstrument(globals.symbols.getLeaf(this.a, this.b, this.c));
+    if (this.isFuture) {
+      inst.exp = this.exp;
+    }
+    if (this.isOption) {
+      inst.exp = this.exp;
+      inst.stk = this.stk;
+      inst.opt = this.cepe;
+    }
+
+    return inst;
+  }
+
+  get trade() {
+    return new Trade(this.instrument, this.createTime, this.isBuy, this.tqty, this.entryPrice);
   }
 
   get a() {
@@ -1072,6 +1221,9 @@ class StrategyLeg {
     return this._prc;
   }
   set entryPrice(val) {
+    if (this._history.size > 0) {
+      throw new Error("Cannot set Entry Price of an adjusted Leg");
+    }
     this._prc = parseFloat(val);
   }
 
@@ -1081,11 +1233,15 @@ class StrategyLeg {
   }
   set curPrice(val) {
     this._curPrc = parseFloat(val);
-    this.updatedNow();
+    this._lastUpdTm = Date.now();
   }
 
-  get extPrice() {
+  get exitPrice() {
     return this._extPrc;
+  }
+
+  get settledValue() {
+    return this._stlVal;
   }
 
   get lots() {
@@ -1095,25 +1251,29 @@ class StrategyLeg {
     this._q = parseInt(val);
   }
 
+  get exitLots() {
+    return this._extq;
+  }
+
   get tqty() {
     return this._q * LOT_SIZE[this._c];
   }
 
+  get histCount() {
+    return this._history.size;
+  }
+
   get lastUpdateTime() {
     // epoch time in msec
-    return this._lastUpdTm.getTime();
+    return this._lastUpdTm;
   }
   set lastUpdateTime(val) {
     // val can be null/0, epoch time in msec
     if (!val) {
-      this._lastUpdTm = new Date();
+      this._lastUpdTm = Date.now();
     } else {
-      this._lastUpdTm = new Date(val);
+      this._lastUpdTm = new Date(val).getTime();
     }
-  }
-
-  updatedNow() {
-    this._lastUpdTm = Date.now();
   }
 }
 
@@ -1502,12 +1662,34 @@ class SymbolLeaf {
     return this._key;
   }
 
+  set expiries(val) {
+    this._exps = val;
+  }
   get expiries() {
     return this._exps;
   }
+  get monthlyExpiries() {
+    if (this._mnthlyExps) {
+      return this._mnthlyExps;
+    }
 
-  set expiries(val) {
-    this._exps = val;
+    if (this.isFuture) {
+      // No Weekly expiries for futures
+      return this._exps;
+    }
+    if (this.isOption) {
+      expsMap = new Map();  // YYYYMM => Expiry
+      for (let i = 0; i < this._exps.length; i++) {
+        // Already sorted, so for each month the largest (monthly) expiry date will overwrite
+        //   the smaller (weekly) expiry dates
+        expsMap.set(this._exps[i].substr(0, 6), this._exps[i]);
+      }
+
+      this._mnthlyExps = Array.from(expsMap.values());
+      return this._mnthlyExps;
+    }
+
+    return null;
   }
 
   get isFuture() {
@@ -1534,20 +1716,11 @@ class SymbolLeaf {
     //return (this.b === "INDEX")
   }
 
-  getStrikes(exp) {
-    return this._stks.get(exp);
-  }
-
   setStrikes(exp, val) {
     this._stks.set(exp, val);
   }
-
-  getDays(exp = null) {
-    if (exp === null || exp === undefined) {
-      return this._days;
-    } else {
-      return this._expDays.get(exp);
-    }
+  getStrikes(exp) {
+    return this._stks.get(exp);
   }
 
   setDays(exp, val) {
@@ -1556,6 +1729,40 @@ class SymbolLeaf {
     } else {
       this._expDays.set(exp, val);
     }
+  }
+  getDays(exp = null) {
+    if (exp === null || exp === undefined) {
+      return this._days;
+    } else {
+      return this._expDays.get(exp);
+    }
+  }
+
+  getMonthlyExpiry(dateYYYYMMDD, deferMonth=0) {
+    // Get monthly expiry date for the given date
+    // deferMonth - 0 - current expiry, 1 - Next Deferred/Expiry month, 2 - 2 mnth later expiry
+    // expiry list is in YYYYMMDD format and is already sorted (asc)
+
+    if (this.isIndex) {
+      throw new Error("No expiries exist for Indexes");
+    }
+
+    if (typeof(dateYYYYMMDD) === "number") {
+      dateYYYYMMDD = dateYYYYMMDD.toString();
+    }
+
+    let monthly = this.monthlyExpiries;
+    for (let i = 0; i < monthly.length; i++) {
+      if (dateYYYYMMDD <= monthly[i]) {
+        if (monthly[i+deferMonth]) {
+          return monthly[i+deferMonth];
+        } else {
+          return null;
+        }
+      }
+    }
+
+    return null;
   }
 
   getAutocompleteList() {
@@ -2300,7 +2507,6 @@ class DBResult {
   get req() {
     return this._req;
   }
-
   set req(val) {
     this._req = val;
   }
@@ -2308,7 +2514,6 @@ class DBResult {
   get ok() {
     return this._ok;
   }
-
   set ok(val) {
     return this._ok = val;
   }
@@ -2316,7 +2521,6 @@ class DBResult {
   get id() {
     return this._id;
   }
-
   set id(val) {
     this._id = val;
   }
@@ -2324,7 +2528,6 @@ class DBResult {
   get rev() {
     return this._rev;
   }
-
   set rev(val) {
     this._rev = val;
   }
@@ -2332,7 +2535,6 @@ class DBResult {
   get sym() {
     return this._sym;
   }
-
   set sym(val) {
     this._sym = val;
   }
@@ -2340,7 +2542,6 @@ class DBResult {
   get record() {
     return this._rec;
   }
-
   set record(val) {
     if (val instanceof Record) {
       this._rec = val;
@@ -2364,7 +2565,6 @@ class DBResult {
     // DBError
     return this._err;
   }
-
   set error(val) {
     if (val instanceof DBError) {
       this._err = val;
@@ -2382,7 +2582,6 @@ class DBResult {
 
     return 0;
   }
-
   set status(val) {
     // For successful response from a few DB APIs
     this.ok = val.ok;
@@ -2749,7 +2948,7 @@ class UserDB {
       }
     });
 
-    console.log("Index " + idxRes);
+    //console.log("Index " + idxRes);
 
     let result = await this.db.find({
         selector : {
@@ -3022,7 +3221,9 @@ class DBFacade {
   static async fetchRecs(a, b, c, d, e, f, g, h, i) {
     let abc = DBFacade.symList.getLeaf(a, b, c);
     let dbreq = new DBRequest(abc);
-    dbreq.exp = d;
+    if (d) {
+      dbreq.exp = d;
+    }
     if (e) {
       dbreq.reqDts = e;
     }
@@ -3041,9 +3242,10 @@ class DBFacade {
       let data = null;
       try {
         data = await DBFacade.listsDB.fetchSyms();
+        console.log(data);
       } catch (err) {
         let response = await Fetcher.getXTM();
-        data = response.data()[0];
+        data = response.data();
         DBFacade.listsDB.saveSyms(data);
       }
 

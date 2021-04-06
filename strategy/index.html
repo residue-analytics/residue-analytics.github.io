@@ -218,14 +218,11 @@
             <button type="button" id="buy" class="btn btn-success" onclick="addLeg(this.id, 'BUY')">BUY</button>
             <button type="button" id="sell" class="btn btn-danger" onclick="addLeg(this.id, 'SELL')">SELL</button>
             <button type="button" id="livecontrol" class="btn btn-outline-secondary bi-stopwatch" onclick="liveMonitor(this)">
-              <span class="badge bg-secondary">0</span>
+              <span class="badge bg-secondary">00</span>
             </button>
           </div>
           
         </div>
-        <!-- <div class="d-grid col-md-2 mb-3 mx-auto">
-          <button type="button" id="fetchLTP" class="btn btn-primary visually-hidden" onclick="getRecords()">Update LTP</button>
-        </div> -->
       </div>
     </div>
 
@@ -233,7 +230,8 @@
       
       <hr />
 
-      <pre class="row text-break" style="white-space:normal" id="output"></pre>
+      <div id="extendedCards" is="x-data-cards" class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-5">
+      </div>
 
       <template id="editorTemplate">
         <div class="card text-center mb-3" id="STG_ID">
@@ -285,6 +283,7 @@
       </template>
       <div id="editor" is="strategy-editor" class="row">
       </div>
+
       <template id="cardTemplate">
         <div class="col" id="STG_ID">
           <div class="card shadow-sm">
@@ -297,7 +296,7 @@
           </div>
         </div>
       </template>
-      <div is="strategy-card-list" id="strategyCards" class="row row-cols-1 row-cols-md-3 row-cols-lg-4 mb-3">
+      <div is="strategy-card-list" id="strategyCards" class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-5 mb-3">
       
       </div>
 
@@ -307,11 +306,29 @@
   <script type="text/javascript">
 
     var selector = null;
+    var refreshDuration = 10;
 
     $(document).ready(setLayout);
 
     function setLayout() {
-      globals.strategies = new StrategyList();
+      UIUtils.addSpinner("buy"); UIUtils.addSpinner("sell");
+
+      selector = new ResDataSelector("exchange", "instrument", "underlying",
+        "expiries", "strikes", "ce_pe", "days", "dateslider", "timeslider", "erroralert", 
+        getRecords, disablePageInteractions, enablePageInteractions);
+        
+      selector.cacheAllSelectors().then(data => {
+        DBFacade.fetchUserData(new StrategyList("editor", "strategyCards")).then(stgs => {
+          globals.strategies = stgs;
+          strategyCards.updateCards(globals.strategies);
+
+          UIUtils.rmSpinner("buy"); UIUtils.rmSpinner("sell");
+        });
+
+      }).catch(error => {
+        UIUtils.showAlert("erroralert", error);
+        UIUtils.rmSpinner("buy"); UIUtils.rmSpinner("sell");
+      });
 
       var collapseElementList = [].slice.call(document.querySelectorAll('.collapse'));
       var collapseList = collapseElementList.map(function (collapseEl) {
@@ -323,21 +340,6 @@
         return new bootstrap.Tooltip(tooltipTriggerEl, {
           container: document.getElementById("selectorTooltip")
         });
-      });
-
-      UIUtils.addSpinner("buy"); UIUtils.addSpinner("sell");
-      selector = new ResDataSelector("exchange", "instrument", "underlying",
-        "expiries", "strikes", "ce_pe", "days", "dateslider", "timeslider", "erroralert", getRecords);
-      selector.cacheAllSelectors().then(data => {
-        DBFacade.fetchUserData(new StrategyList("editor", "strategyCards")).then(stgs => {
-          globals.strategies = stgs;
-          strategyCards.updateCards(globals.strategies);
-        });
-
-        UIUtils.rmSpinner("buy"); UIUtils.rmSpinner("sell");
-      }).catch(error => {
-        UIUtils.showAlert("erroralert", error);
-        UIUtils.rmSpinner("buy"); UIUtils.rmSpinner("sell");
       });
 
       // Custom Event handlers
@@ -373,21 +375,6 @@
       $(node).toggleClass("bi-arrows-expand");
     }
 
-    // Not used anymore
-    function updateStrategies() {
-      // update all strategies on the page
-
-       if (globals.strategies) {
-        console.log("Updating Strategies");  
-        for (let strategy of globals.strategies.values()) {
-          strategy.updateValueCardView();
-          //jCards.append($(cardRenderer.getValueCard(strategy)));
-        }
-      } else {
-        console.log("No strategies to update");
-      }
-  }
-
     function addLeg(id, action) {
 
       UIUtils.addSpinner(id);
@@ -398,45 +385,35 @@
       }
 
       try {
-        let ltp = parseFloat(document.getElementById("LTP").value);
         let qty = parseInt(document.getElementById("quantity").value);
+        let ltp = parseFloat(document.getElementById("LTP").value);
 
         if (!(ltp && qty && ltp > 0 && qty > 0)) {
           throw new Error("Invalid LTP or Qty");
         }
 
-        let sym = globals.symbols.getLeaf($("#exchange").val(), $("#instrument").val(), $("#underlying").val());
+        let instrument = selector.instrument;
         let leg = null;
-        let rangeSlider = $("#timeslider").data('ionRangeSlider');
-        if (sym.isOption) {
-          leg = new StrategyLeg(sym, $("#expiries").val(), "BUY" === action, qty, ltp, 
-                                $("#strikes").val(), $("#ce_pe").val(), rangeSlider.result.from);
-        } else if (sym.isFuture) {
-          leg = new StrategyLeg(sym, $("#expiries").val(), "BUY" === action, qty, ltp, null, null, rangeSlider.result.from);
+
+        if (instrument.isOption) {
+          leg = new StrategyLeg(instrument.sym, instrument.exp, "BUY" === action, qty, ltp, 
+                                instrument.stk, instrument.opt, instrument.simulationTS);
+        } else if (instrument.isFuture) {
+          leg = new StrategyLeg(instrument.sym, instrument.exp, "BUY" === action, qty, ltp, 
+                                null, null, instrument.simulationTS);
         } else {
           throw new Error("Cannot add Index to a Strategy");
         }
 
         if (leg.entryValue) {
           console.log("leg value: " + leg.entryValue);
-
-          let tmstmp = null;
-          if (! $("#livecontrol").data("live")) {
-            let rangeSlider = $("#timeslider").data('ionRangeSlider');
-            tmstmp = rangeSlider.result.from;
-          }
           
-          leg.updatePrice(tmstmp).then(leg => {  // updatePrice() returns the leg itself
-            console.log(strategy.add(leg));
-            console.log(strategy.entryValue);
-            editor.update(strategy);
-            UIUtils.rmSpinner(id);
-          }).catch(error => {
-            //output.innerHTML = JSON.stringify(error);
-            console.log(error);
-            UIUtils.rmSpinner(id);
-            UIUtils.showAlert("erroralert", error);
-          });
+          console.log(`Leg added [${strategy.add(leg)}]`);
+          
+          console.log(`Strategy Entry Value [${strategy.entryValue}]`);
+
+          editor.update(strategy);
+          UIUtils.rmSpinner(id);
         } else {
           console.log(JSON.stringify(leg));
          
@@ -444,38 +421,61 @@
         }
       } catch(error) {
 
-        //output.innerHTML = JSON.stringify(error);
-        console.log(error);
+        if (error instanceof ResError) {
+          console.log(error.toString());
+
+        } else {
+          console.log(`Unknown Error [${error}]`);
+        }
+
         UIUtils.rmSpinner(id);
         UIUtils.showAlert("erroralert", error);
       }
     }
 
-    function getRecords() {
-      UIUtils.addSpinner("buy"); UIUtils.addSpinner("sell");
-      //UIUtils.addSpinner("fetchLTP");
-      UIUtils.getRecords("exchange", "instrument", "underlying",
-        "expiries", "strikes", "ce_pe", "timeslider", true).then(response => {
-          //let output = document.getElementById("output");
-          //output.innerHTML = JSON.stringify(response);
+    function disablePageInteractions() {
+      UIUtils.addSpinner("buy");
+      UIUtils.addSpinner("sell");
+    }
 
-          let one = response.one;
-          $("#LTP").val(one.ltp.toFixed(2));
-          $("#OI").val(one.oi == null ? "NA" : one.oi);
-          
-          //new DataTable().loadTable("output", response);
-          UIUtils.rmSpinner("buy"); UIUtils.rmSpinner("sell");
-          //UIUtils.rmSpinner("fetchLTP");
-        }).catch(error => {
-          //let output = document.getElementById("output");
-          //output.innerHTML = JSON.stringify(error);
-          console.log(error);
+    function enablePageInteractions() {
+      UIUtils.rmSpinner("buy");
+      UIUtils.rmSpinner("sell");
+    }
+
+    function getRecords(response) {
+
+      if (response instanceof RecordList) {
+        let one = response.one;
+        let ltp = one.ltp;  // Save on some extra calc in ltp()
+        if (ltp) {
+          $("#LTP").val(ltp.toFixed(2));
+        } else {
           $("#LTP").val("NA");
-          $("#ID").val("NA");
-          UIUtils.rmSpinner("buy"); UIUtils.rmSpinner("sell");
-          //UIUtils.rmSpinner("fetchLTP");
-          UIUtils.showAlert("erroralert", error);
-        });
+          UIUtils.showAlert("erroralert", "LTP Not Available");
+        }
+        if (one.oi) {
+          $("#OI").val(one.oi == null ? "NA" : one.oi);  
+        } else {
+          $("#OI").val("NA");
+          UIUtils.showAlert("erroralert", "OI Not Available");
+        }
+      } else {
+        // Error
+        console.log(typeof(response));
+        $("#LTP").val("NA");
+        $("#OI").val("NA");
+        
+        UIUtils.showAlert("erroralert", response);
+      }
+
+       let instrument = selector.instrument;
+       let extendedCards = document.getElementById("extendedCards");
+       instrument.makeFuture(0).then((futInst) => extendedCards.append(futInst));
+       instrument.makeFuture(1).then((futInst) => extendedCards.append(futInst));
+       instrument.makeFuture(2).then((futInst) => extendedCards.append(futInst));
+       instrument.makeIndex().then((idxInst) => extendedCards.append(idxInst));
+       instrument.makeIndex("VIX").then((idxInst) => extendedCards.append(idxInst));
     }
 
     function liveMonitor(node) {
@@ -485,26 +485,50 @@
         jElem.data("live", false);
         jElem.removeClass("bg-primary text-light");
         clearInterval(jElem.data("timer"));
-        jElem.find(".badge").text("0");
+        jElem.find(".badge").text("00");
       } else {
         jElem.data("live", true);
         jElem.toggleClass("bg-primary text-light");
         let badge = jElem.find(".badge");
-        badge.text("60");
+        badge.text(refreshDuration.toString());
         let id = setInterval(function() {
           let timeLeft = parseInt(badge.text());
           if (timeLeft === 0) {
-            timeLeft = 60;
-            badge.text(timeLeft.toString());
-            strategyCards.updateCards(globals.strategies);
+            timeLeft = refreshDuration;
+            badge.text((timeLeft < 10) ? "0" + timeLeft : timeLeft.toString());
+            // Update the time slider, move it forward by 1 min (60000 msec)
+            selector.timeSliderVal = selector.timeSliderVal + 60000;
+
+            updateStrategies()
+              .then(() => {console.log("In Timer : Success updating strategies");})
+              .catch(() => {console.log("In Timer : Error updating strategies");});
+            // strategyCards.updateCards(globals.strategies);  // Being updated in updateStrategies()
+
           } else {
             timeLeft--;
-            badge.text(timeLeft.toString());
+            badge.text((timeLeft < 10) ? "0" + timeLeft : timeLeft.toString());
           }
           
         }, 1000);
         jElem.data("timer", id);
       }
+    }
+
+    async function updateStrategies() {
+      let stgInEdit = editor.current;
+      tmstmp = selector.timeSliderVal;
+
+      // Calling editor strategy update separately as we have a clone in here or it could be a new one
+      await stgInEdit.updatePrice(tmstmp, 
+        (pos) => { console.log(`Strategy updated in editor, pos [${pos}]`); editor.update(stgInEdit) },
+        (reason) => { console.log(`Strategy in Editor failed to update [${reason}]`)});
+
+      await globals.strategies.updatePrice(tmstmp, 
+        (stg, pos) => { 
+          console.log(`Global strategy updated [${stg.id}:${pos}]`);
+          strategyCards.updateCard(stg, stg.id === stgInEdit.id);  
+        },
+        (stg, reason) => { console.log(`Global Strategy failed to update [${stg.id}:${reason}]`) });
     }
 
     function addStrategy() {
@@ -577,7 +601,12 @@
         strategyCards.updateCard(curEdit, false);
       }
 
-      editor.update(toEdit.clone());
+      // Preserve history in the clone, as the strategy in editor will be saved back in the list
+      editor.update(toEdit.clone(true));
+      
+      // Update selector to show the first trade
+      selector.updateSelectors(editor.current.firstTrade);
+
       // Update the card to show the "in-editor" indication
       strategyCards.updateCard(toEdit, true);
     }
