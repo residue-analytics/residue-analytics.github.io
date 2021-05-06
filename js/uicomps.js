@@ -1,117 +1,4 @@
 
-class TradingInstrument {
-  constructor(sym) {
-    this._sym = sym;
-  }
-
-  async makeFuture(deferMonth=0) {
-    // Create a Future Instrument based on this instrument and its simulation Date
-    let futSym = globals.symbols.getLeaf(this.sym.a, "FUTURES", this.sym.c);
-    if (!futSym) {
-      return null;
-    }
-
-    await DBFacade.fetchLists(futSym);  // This will update the required data in sym
-    
-    let exp = futSym.getMonthlyExpiry(this.simulationDateYYYYMMDD, deferMonth);
-    if (exp) {
-      let futInst = new TradingInstrument(futSym);
-      futInst.exp = exp;
-      futInst.simulationTS = this.simulationTS;
-      return futInst;
-    }
-
-    return null;
-  }
-
-  async makeIndex(idx=this.sym.c) {
-    let idxSym = globals.symbols.getLeaf(this.sym.a, "INDEX", idx);
-    if (!idxSym) {
-      return null;
-    }
-
-    await DBFacade.fetchLists(idxSym);
-    
-    let idxInst = new TradingInstrument(idxSym);
-    idxInst.simulationTS = this.simulationTS;
-
-    return idxInst;
-  }
-
-  get sym() {
-    return this._sym;
-  }
-
-  set exp(val) {
-    this._exp = val;
-    this._expDisp = val.substr(6, 2) + "-" + val.substr(4, 2) + "-" + val.substr(0, 4);
-  }
-  get exp() {  // YYYYMMDD
-    return this._exp;
-  }
-  get expDisplay() {
-    return this._expDisp
-  }
-
-  set stk(val) {
-    this._stk = val;
-  }
-  get stk() {
-    return this._stk;
-  }
-
-  set opt(val) {
-    this._opt = val;
-  }
-  get opt() {
-    return this._opt;
-  }
-
-  get isFuture() {
-    return this.sym.b === "FUTURES";
-  }
-
-  get isOption() {
-    return this.sym.b === "OPTIONS";
-  }
-
-  get isIndex() {
-    return this.sym.b === "INDEX";
-  }
-
-  set simulationTS(val) {
-    this._simDt = val;
-  }
-  get simulationTS() {
-    return this._simDt;  // Number 
-  }
-  get simulationDate() {
-    return new Date(this._simDt);
-  }
-  get simulationDateYYYYMMDD() {  // YYYYMMDD format (UTC)
-    let dt = this.simulationDate;
-    return dt.getUTCFullYear().toString() + ((dt.getUTCMonth() < 9) ? '0' + (dt.getUTCMonth() + 1) : (dt.getUTCMonth() + 1).toString()) + ((dt.getUTCDate() < 10) ? '0' + dt.getUTCDate() : dt.getUTCDate().toString());
-  }
-
-  isSame(other) {
-    if (this.sym === other.sym) {  // No need to compare a, b & c. sym are global
-      if (this.isIndex) {
-        return true;
-      }
-      if (this.exp === other.exp) {
-        if (this.isFuture) {
-          return true;
-        }
-        if (this.stk === other.stk && this.opt === other.opt) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
-}
-
 class Trade {
   constructor(instrument, tod, isBuy, qty, prc) {
     this.inst = instrument;
@@ -132,7 +19,8 @@ class Trade {
 
 class ResDataSelector {
   constructor(excID, instID, undID, expID, stkID, cepeID, daysID, dateSliderID, 
-    timeSliderID, errID, dataRefreshCallback, disablePageCallback, enablePageCallback) {
+    timeSliderID, errID, dataRefreshCallback, disablePageCallback, enablePageCallback,
+    sliderUpdateCallback) {
     
     this.excID = excID;
     this.instID = instID;
@@ -147,7 +35,10 @@ class ResDataSelector {
     this.callback = dataRefreshCallback;
     this.disableCallback = disablePageCallback;
     this.enableCallback = enablePageCallback;
+    this.sliderUpdateCallback = sliderUpdateCallback;
+
     this.cacheSyms = null;
+    this.isCollapsed = false;
 
     this.init();
     this.fetchSymbols();
@@ -177,8 +68,8 @@ class ResDataSelector {
         from: 0,   // initDates.indexOf("2021-01-01")
         //to: 2,   // initDates.indexOf("2021-01-03")
         force_edges: true,
-        onFinish: (data) => { this.fetchRecords(); },
-        onUpdate: (data) => { this.fetchRecords(); }
+        onFinish: (data) => { this.fetchRecords(); },  // This should update time slider only
+        onUpdate: (data) => { this.fetchRecords(); }   // This should update time slider only
       });
 
       this.dateSlider = $(this.dateSliderEl).data('ionRangeSlider');
@@ -194,8 +85,8 @@ class ResDataSelector {
       //to: UIUtils.dateToTS(new Date("2021-01-01T13:00:00+05:30")),
       force_edges: true,
       prettify: UIUtils.tsToDate,
-      onFinish: (data) => { this.fetchRecords(data); },
-      onUpdate: (data) => { this.fetchRecords(data); }
+      onFinish: (data) => { this.timesliderUpdated(data); },
+      onUpdate: (data) => { this.timesliderUpdated(data); }
     });
 
     this.timeSlider = $(this.timeSliderEl).data('ionRangeSlider');
@@ -519,7 +410,17 @@ class ResDataSelector {
     return this.cacheSyms;
   }
 
-  fetchRecords(dataORevent) {  // data when call is from the slider, event when from event listener
+  timesliderUpdated(data) {
+    if (this.sliderUpdateCallback) {
+      this.sliderUpdateCallback(data.from);
+    }
+    
+    if (!this.isCollapsed) {
+      this.fetchRecords(data);
+    }
+  }
+
+  fetchRecords(dataORevent=null) {  // data when call is from the slider, event when from event listener and null when from main page
     console.log("selector fetchrecs");
     this.disableCallback();  // Disable the Page interactions
 
@@ -560,6 +461,7 @@ class ResDataSelector {
     // Value at the Time Slider's thumb in msec
     return this.timeSlider.result.from;
   }
+  
   set timeSliderVal(val) {
     this.timeSlider.update({
       from: val
@@ -712,11 +614,11 @@ class StrategyCardRenderer {
           <div>${stg.name}
             <a class="bi-trash text-danger float-end" href="#/" 
               onclick="this.dispatchEvent(new CustomEvent('delstg', {
-                bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
+                bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } 
               }))" aria-label="Remove"></a> 
             <a class="bi-pencil-square text-${stg.isinFullView ? "danger" : "primary"} float-end me-2" href="#/" aria-label="Edit" 
               onclick="this.dispatchEvent(new CustomEvent('edtstg', {
-                bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
+                bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } 
               }))"></a> 
           </div>
         </div> 
@@ -756,7 +658,7 @@ class StrategyCardRenderer {
       <td>
         <a class="bi-trash text-danger" href="#/" aria-label="Remove" 
           onclick="this.dispatchEvent(new CustomEvent('delleg', {
-            bubbles: true, calcelable: true, detail: { stg: '${stg.id}', leg: '${leg.id}' } 
+            bubbles: true, cancelable: true, detail: { stg: '${stg.id}', leg: '${leg.id}' } 
           }))"></a>
       </td>
       </tr>
@@ -836,11 +738,11 @@ class StrategyCardRenderer {
           <small>Created On: ${new Date(stg.createTime).toLocaleString()}</small> 
           <a href="#/" class="me-2 bi-save-fill text-success float-end" 
             onclick=" this.dispatchEvent(new CustomEvent('savstg', {
-              bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
+              bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } 
             }))"></a> 
           <a href="#/" class="me-2 bi-trash text-danger float-end" 
             onclick="this.dispatchEvent(new CustomEvent('delstg', {
-              bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
+              bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } 
             }))"></a> 
         </div>
     </div>`;
@@ -1005,13 +907,22 @@ class StrategyFullCardElement extends HTMLDivElement {
     super();
     // element created
 
-    this.stg = stg;
-    
     this.innerHTML = this.getFullCard( (stg) ? stg : new Strategy("Edit Name") );
   }
 
   get current() {
+    // Update the name in the strategy
+    if (this.stg) {
+      let spanEl = this.querySelector("#" + this.stg.id + "-name");
+      this.stg.name = spanEl.innerText;
+    }
+
     return this.stg;
+  }
+
+  showUnsavedWarning() {
+    const warning = new bootstrap.Modal(this.querySelector(".modal"));
+    warning.show();
   }
 
   update(stg=null) {
@@ -1105,7 +1016,7 @@ class StrategyFullCardElement extends HTMLDivElement {
       <td>
         <a class="bi-trash text-danger" href="#/" aria-label="Remove" 
           onclick="this.dispatchEvent(new CustomEvent('delleg', {
-            bubbles: true, calcelable: true, detail: { stg: '${stg.id}', leg: '${leg.id}' } 
+            bubbles: true, cancelable: true, detail: { stg: '${stg.id}', leg: '${leg.id}' } 
           }))"></a>
       </td>
       </tr>
@@ -1115,7 +1026,7 @@ class StrategyFullCardElement extends HTMLDivElement {
     }
 
     if (allLegs.length === 0) {
-      allLegs = `<tr><td colspan="10">BUY or SELL (add a Leg)</td></tr>`;
+      allLegs = `<tr><td colspan="10">BUY or SELL (Add a Leg)</td></tr>`;
     }
 
     let footer = `<tr> 
@@ -1136,8 +1047,9 @@ class StrategyFullCardElement extends HTMLDivElement {
       <div class="card text-center mb-3" id="${stg.id}"> 
         <div class="card-header"> 
           <div class="d-flex"> 
-            <div class="me-auto align-self-center"> 
-              <span>${stg.name}</span>
+            <div class="me-auto align-self-center">
+              <i title="Your Canvas" class="bi-easel"></i>
+              <span title="Click/Tap to Edit the Name" contenteditable='true' id="${stg.id}-name">${stg.name}</span>
             </div> 
             <ul class="nav nav-pills" role="tablist"> 
               <li class="nav-item" role="presentation"> 
@@ -1189,20 +1101,56 @@ class StrategyFullCardElement extends HTMLDivElement {
         </div> 
         <div class="card-footer text-muted"> 
           <small>Created : ${new Date(stg.createTime).toLocaleString("en-IN")}, 
-                 Last Updated : ${new Date(stg.lastUpdateTime).toLocaleString("en-IN")}</small> 
-          <a href="#/" class="me-2 bi-save-fill text-success float-end" 
+                 Last Updated : ${new Date(stg.lastUpdateTime).toLocaleString("en-IN")}
+          </small> 
+
+          <a title="Delete" href="#/" class="me-2 bi-trash text-danger float-end" 
+             onclick="this.dispatchEvent(new CustomEvent('delstg', {
+             bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } }))">
+          </a> 
+
+          <a title="Save" href="#/" class="me-2 bi-file-arrow-down text-success float-end" 
             onclick=" this.dispatchEvent(new CustomEvent('savstg', {
-              bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
-            }))"></a> 
-          <a href="#/" class="me-2 bi-trash text-danger float-end" 
-            onclick="this.dispatchEvent(new CustomEvent('delstg', {
-              bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
-            }))"></a> 
+              bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } }))">
+          </a> 
+
+          <a title="Save Copy" href="#/" class="me-2 bi-files text-success float-end" 
+            onclick=" this.dispatchEvent(new CustomEvent('cpystg', {
+              bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } }))">
+          </a>
+
+          <a title="Discard Changes / Reload" href="#/" class="me-2 bi-arrow-clockwise text-danger fw-bold float-end" 
+            onclick=" this.dispatchEvent(new CustomEvent('rldstg', {
+              bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } }))">
+          </a>
         </div>
       </div>
     </div>`;
 
-    return fullCardHTML;
+    return fullCardHTML + this.getModalHTML();
+  }
+
+  getModalHTML() {
+    let modalHTML = `
+      <div class="modal fade" id="editorConfirmModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title text-warning">WARNING!!</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              You have unsaved strategy in the Editor. <br>Save or Discard the changes, first.
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    return modalHTML;
   }
 
   connectedCallback() {
@@ -1233,6 +1181,103 @@ class StrategyFullCardElement extends HTMLDivElement {
   // there can be other element methods and properties
 }
 customElements.define("strategy-editor", StrategyFullCardElement, {extends: 'div'});
+
+class StrategyValueCardElement extends HTMLDivElement {
+  // Raises newstg, delstg and edtstg events
+  constructor(stg=null, stgInEdit=false) {
+    super();
+    // element created
+
+    this.stg = stg;
+    this.className = "col mb-3";
+    this.innerHTML = this.getValueCard(stg, stgInEdit);
+  }
+
+  getValueCard(stg, stgInEdit) {
+    if (!stg) {
+      this.id = Date.now();
+
+      return `
+      <div class="card shadow-sm">
+        <div title="Strategy" class="card-header p-2">
+          <div class="d-inline-block w-75 text text-truncate">Strategy</div>
+          <div class="float-end">
+            <a title="Create New" class="bi-pencil-square text-primary" href="#/" aria-label="Create New" 
+              onclick="this.dispatchEvent(new CustomEvent('newstg', {
+                bubbles: true, cancelable: true }))">
+            </a> 
+          </div>
+        </div> 
+        <div class="card-body p-2 text-center">
+          <h5 class="card-title text-success">
+            <i title="Create New" class="bi bi-plus-square-dotted" 
+            onclick="this.dispatchEvent(new CustomEvent('newstg', {
+              bubbles: true, cancelable: true }))"></i>
+          </h5>
+          <span>Create New</span>
+        </div> 
+        <div class="card-footer p-2 text-muted"> 
+          <small>&nbsp;</small> 
+        </div> 
+      </div>`;
+    }
+
+    let value = stg.curPosition.toFixed(2);
+    this.id = stg.id;
+
+    return `
+      <div class="card ${stgInEdit ? "border-warning shadow-lg" : "shadow-sm"}">
+        <div title="${stg.name}" class="card-header p-2">
+          <div class="d-inline-block w-75 text text-truncate">${stg.name}</div>
+          <div class="float-end">
+            <a title="${stgInEdit ? "In Editor" : "Edit"}" class="bi-pencil-square text-${stgInEdit ? "danger" : "primary"}" href="#/" aria-label="Edit" 
+            onclick="this.dispatchEvent(new CustomEvent('edtstg', {
+              bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } 
+            }))"></a> 
+          </div>
+        </div> 
+        <div class="card-body p-2 text-center">
+          <h5 class="card-title text-${value >= 0 ? "success" : "danger"}">${value}</h5>
+          <span>${stg.count.toString()} Legs</span>
+        </div> 
+        <div class="card-footer p-2 text-center text-muted fs-6"> 
+          <small>${new Date(stg.createTime).toLocaleString("en-IN", {hour12:false})}</small> 
+          <div class="float-end">
+            <a title="Delete" class="bi-trash text-danger" href="#/" 
+              onclick="this.dispatchEvent(new CustomEvent('delstg', {
+                bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } 
+              }))" aria-label="Remove"></a>
+          </div>
+        </div> 
+      </div>`;
+  }
+
+  connectedCallback() {
+    // browser calls this method when the element is added to the document
+    // (can be called many times if an element is repeatedly added/removed)
+  }
+
+  disconnectedCallback() {
+    // browser calls this method when the element is removed from the document
+    // (can be called many times if an element is repeatedly added/removed)
+  }
+
+  static get observedAttributes() {
+    return [/* array of attribute names to monitor for changes */];
+  }
+
+  attributeChangedCallback(name, oldValue, newValue) {
+    // called when one of attributes listed above is modified
+  }
+
+  adoptedCallback() {
+    // called when the element is moved to a new document
+    // (happens in document.adoptNode, very rarely used)
+  }
+
+  // there can be other element methods and properties
+}
+customElements.define("strategy-card", StrategyValueCardElement, {extends: 'div'});
 
 class StrategyValueCardElementList extends HTMLDivElement {
   constructor() {
@@ -1299,141 +1344,102 @@ class StrategyValueCardElementList extends HTMLDivElement {
 }
 customElements.define("strategy-card-list", StrategyValueCardElementList, {extends: 'div'});
 
-class StrategyValueCardElement extends HTMLDivElement {
-  // Raises addstg, delstg and edtstg events
-  constructor(stg=null, stgInEdit=false) {
-    super();
-    // element created
-
-    this.stg = stg;
-    this.className = "col mb-3";
-    this.innerHTML = this.getValueCard(stg, stgInEdit);
-  }
-
-  getValueCard(stg, stgInEdit) {
-    if (!stg) {
-      this.id = Date.now();
-
-      return `
-      <div class="card shadow-sm">
-        <div class="card-header">
-          <div>Strategy
-            <i class="bi-trash text-danger float-end" aria-label="Remove"></i> 
-            <a class="bi-pencil-square text-primary float-end me-2" href="#/" aria-label="Edit" 
-              onclick="this.dispatchEvent(new CustomEvent('addstg', {
-                bubbles: true, calcelable: true }))">
-            </a> 
-          </div>
-        </div> 
-        <div class="card-body text-center">
-          <h5 class="card-title text-success">
-            <i class="bi bi-plus-square-dotted" 
-            onclick="this.dispatchEvent(new CustomEvent('addstg', {
-              bubbles: true, calcelable: true }))"></i>
-          </h5>
-          <span>Create New</span>
-        </div> 
-        <div class="card-footer text-muted"> 
-          <small>&nbsp;</small> 
-        </div> 
-      </div>`;
-    }
-
-    let value = stg.curPosition.toFixed(2);
-    this.id = stg.id;
-
-    return `
-      <div class="card shadow-sm">
-        <div class="card-header">
-          <div>${stg.name}
-            <a class="bi-trash text-danger float-end" href="#/" 
-              onclick="this.dispatchEvent(new CustomEvent('delstg', {
-                bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
-              }))" aria-label="Remove"></a> 
-            <a class="bi-pencil-square text-${stgInEdit ? "danger" : "primary"} float-end me-2" href="#/" aria-label="Edit" 
-              onclick="this.dispatchEvent(new CustomEvent('edtstg', {
-                bubbles: true, calcelable: true, detail: { stg: '${stg.id}' } 
-              }))"></a> 
-          </div>
-        </div> 
-        <div class="card-body text-center">
-          <h5 class="card-title text-${value >= 0 ? "success" : "danger"}">${value}</h5>
-          <span>${stg.count.toString()} Legs</span>
-        </div> 
-        <div class="card-footer text-center text-muted"> 
-          <small>${new Date(stg.createTime).toLocaleString("en-IN")}</small> 
-        </div> 
-      </div>`;
-  }
-
-  connectedCallback() {
-    // browser calls this method when the element is added to the document
-    // (can be called many times if an element is repeatedly added/removed)
-  }
-
-  disconnectedCallback() {
-    // browser calls this method when the element is removed from the document
-    // (can be called many times if an element is repeatedly added/removed)
-  }
-
-  static get observedAttributes() {
-    return [/* array of attribute names to monitor for changes */];
-  }
-
-  attributeChangedCallback(name, oldValue, newValue) {
-    // called when one of attributes listed above is modified
-  }
-
-  adoptedCallback() {
-    // called when the element is moved to a new document
-    // (happens in document.adoptNode, very rarely used)
-  }
-
-  // there can be other element methods and properties
-}
-customElements.define("strategy-card", StrategyValueCardElement, {extends: 'div'});
-
-class FuturesWatchCardElement extends HTMLDivElement {
-  constructor(instrument) {
+class WatchCardElement extends HTMLDivElement {
+  constructor(id, instrument) {
     super();
     
-    if (!instrument.isFuture) {
-      throw new Error(`Future Watch Card for [${instrument.sym.b}]!!`)
-    }
-
+    this.id = id;
     this.instrument = instrument;
+
     this.ltp = "NA";
-    this.ltpdir = 0; // direction of ltp -ve (down), =ve (up), 0 (same)
+    this.ltpdir = 0; // direction of ltp -ve (down), +ve (up), 0 (same)
     this.oi = "NA";
-    this.className = 'col';
-    this.innerHTML = this._getCard();
     
-    this.update().catch(() => console.log("Unable to initial update the Futures Card") );
+    this.footerNode = null;
+    this.ltpNode = null;
+    this.oiNode = null;
+
+    this.className = 'col';
+    this.updateNode(); // update the DOM after setting other attributes and before event handlers
+    this.title = "Market Watch";
+
+    this.update().catch(() => console.log("Unable to initial update the Watch Card") );
+    this.addEventListener("click", this.toggleToolbar);
+    this.addEventListener("mouseover", this.showToolbar);
+    this.addEventListener("mouseout", this.hideToolbar);
   }
 
   _getCard() {
+    // contractName, contractType - from sub-class
     return `
         <div class="card shadow-sm mb-3">
-          <div class="card-header">
-            <span>${this.instrument.sym.c} ${this.instrument.expDisplay}
-            <span class="float-end text-danger align-bottom"><small>FUT</small></span>
+          <div class="card-header py-1">
+            <span>${this.contractName}
+            <a title="Remove from Watch" class="bi-trash text-danger float-end" href="#/" 
+              onclick="this.dispatchEvent(new CustomEvent('delwatch', {
+                bubbles: true, cancelable: true, detail: { inst: ${this.id} } 
+              }))" aria-label="Remove"></a>
+              <span class="float-end text-danger align-bottom"><small>${this.contractType}&nbsp;</small></span>
             </span>
           </div> 
-          <div class="card-body">
-            <div class="card-text">
-              <div>OI : ${this.oi}</div>
-              <div>LTP : 
-                <span class=${this.ltpdir <= 0 ? (this.ltpdir < 0 ? "text-danger" : "") : "text-success"}>
+          <div class="card-body py-1">
+            <div class="card-text d-flex flex-wrap">
+              <span class="flex-fill">LTP : 
+                <span  id=${"W" + this.id + "LTP"} class=${this.ltpdir <= 0 ? (this.ltpdir < 0 ? "text-danger" : "") : "text-success"}>
                 ${this.ltp}</span>
-              </div>
+              </span>
+              <span class="flex-fill">OI : 
+                <span id=${"W" + this.id + "OI"}>${this.oi}</span>
+              </span>
             </div>
           </div>
+          <div class="card-footer text-muted visually-hidden"> 
+            <span>Qty</span>
+            <input title="Quantity (Lots) to Buy or Sell" type="text" 
+              id=${"W" + this.id + "QTY"} class="form-control d-inline w-25" value="1"
+              aria-label="Buy/Sell Quantity" onclick="event.stopPropagation()"/>
+
+            <button title="Send to Contract Selector" type="button" class="me-2 float-end btn btn-primary" 
+              onclick="event.stopPropagation(); 
+                this.dispatchEvent(new CustomEvent('slctinst', {
+                  bubbles: true, cancelable: true, detail: { cardid: '${this.id}' } 
+            }))">
+            <i class="bi-arrow-bar-right"></i>
+            </button>
+
+            <button title="Add a Leg to Strategy in Editor" type="button" class="me-2 float-end btn btn-danger" 
+              onclick="event.stopPropagation(); 
+                this.dispatchEvent(new CustomEvent('sellinst', {
+                  bubbles: true, cancelable: true, detail: { cardid: '${this.id}' } 
+            }))">
+            S
+            </button>
+
+            <button title="Add a Leg to Strategy in Editor" type="button" class="me-2 float-end btn btn-success" 
+              onclick="event.stopPropagation(); 
+                this.dispatchEvent(new CustomEvent('buyinst', {
+                  bubbles: true, cancelable: true, detail: { cardid: '${this.id}' } 
+              }))">
+              B
+            </button>
+          </div>
         </div>`;
+  }
+
+  updateNode() {
+    this.innerHTML = this._getCard();
+    this.footerNode = this.querySelector(".card-footer");
+    this.ltpNode = this.querySelector("#W" + this.id + "LTP");
+    this.oiNode = this.querySelector("#W" + this.id + "OI");
   }
 
   async update(newTS=null) {
     if (newTS) {
       this.instrument.simulationTS = newTS;
+    } else {
+      if (!this.instrument.simulationTS) {
+        this.instrument.simulationTS = Date.now();
+      }
     }
 
     try {
@@ -1441,19 +1447,108 @@ class FuturesWatchCardElement extends HTMLDivElement {
       const one = resultList.one;
       let ltp = one.ltp;
       if (ltp) {
-        ltp = ltp.toFixed(2);
-        this.ltpdir = ltp - this.ltp;
-        this.ltp = ltp;
+        this.LTP = ltp;
       }
       if (one.oi) {
-        this.oi = one.oi;
+        this.OI = one.oi;
       }
 
-      this.innerHTML = this._getCard();
+      //this.updateNode();
     } catch(error) {
-      console.log(error);
+      if (error.code != ResErrorCode.NO_DATA) {
+        console.log(error);
+      }
+
       throw error;
     }
+  }
+
+  toggleToolbar() {
+    if (this.footerNode) {
+      this.footerNode.classList.toggle("visually-hidden");
+    }
+  }
+
+  showToolbar() {
+    if (this.footerNode) {
+      this.footerNode.classList.remove("visually-hidden");
+    }
+  }
+
+  hideToolbar() {
+    if (this.footerNode) {
+      this.footerNode.classList.add("visually-hidden");
+    }
+  }
+
+  get QTY() {
+    return this.querySelector("#W" + this.id + "QTY").value;
+  }
+  set QTY(val) {
+    this.querySelector("#W" + this.id + "QTY").value = val;
+  }
+
+  get LTP() {
+    return Number(this.ltpNode.innerText);
+  }
+  set LTP(val) {
+    if (typeof(val) === 'string') {
+      val = Number(val);
+    }
+    this.ltpdir = val - this.ltp;   // this.ltp is the old value
+    this.ltpNode.innerText = val.toFixed(2);
+    this.ltpNode.className = this.ltpdir <= 0 ? (this.ltpdir < 0 ? "text-danger" : "") : "text-success";
+    this.ltp = val;
+  }
+
+  get OI() {
+    return Number(this.oiNode.innerText);
+  }
+  set OI(val) {
+    this.oiNode.innerText = val;
+  }
+}
+
+class OptionsWatchCardElement extends WatchCardElement {
+  constructor(id, instrument) {
+    super(id, instrument);
+    
+    if (!instrument.isOption) {
+      throw new Error(`Option Watch Card for [${instrument.sym.b}]!!`)
+    }
+  }
+
+  async fetchRec(instrument) {
+    const sym = instrument.sym;
+    return await DBFacade.fetchRecs(sym.a, sym.b, sym.c,
+    instrument.exp, Math.floor(instrument.simulationTS / 60000) * 60, [this.instrument.stk], [this.instrument.opt], null, null);
+  }
+
+  get contractName() {
+    return [this.instrument.sym.c, this.instrument.expDisplay, this.instrument.stk, this.instrument.opt].join(' ');
+  }
+
+  get contractType() {
+    return "OPT";
+  }
+}
+customElements.define("options-card", OptionsWatchCardElement, {extends: 'div'});
+
+class FuturesWatchCardElement extends WatchCardElement {
+  constructor(id, instrument) {
+    super(id, instrument);
+    
+    if (!instrument.isFuture) {
+      throw new Error(`Future Watch Card for [${instrument.sym.b}]!!`)
+    }
+  }
+
+  get contractName() {
+    return [this.instrument.sym.c, this.instrument.expDisplay].join(' ');
+  }
+
+  get contractType() {
+    return "FUT";
   }
 
   async fetchRec(instrument) {
@@ -1464,62 +1559,35 @@ class FuturesWatchCardElement extends HTMLDivElement {
 }
 customElements.define("futures-card", FuturesWatchCardElement, {extends: 'div'});
 
-class IndexWatchCardElement extends HTMLDivElement {
-  constructor(instrument) {
-    super();
+class IndexWatchCardElement extends WatchCardElement {
+  constructor(id, instrument) {
+    super(id, instrument);
     
     if (!instrument.isIndex) {
       throw new Error(`Index Watch Card for [${instrument.sym.b}]!!`)
     }
-
-    this.instrument = instrument;
-    this.ltp = "NA";
-    this.ltpdir = 0; // direction of ltp -ve (down), =ve (up), 0 (same)
-    this.className = 'col';
-    this.innerHTML = this._getCard();
-    
-    this.update().catch(() => console.log("Unable to initial update the Index Card") );
   }
 
   _getCard() {
     return `
         <div class="card shadow-sm mb-3">
-          <div class="card-header">
+          <div class="card-header py-1">
             <span>${this.instrument.sym.c}
             </span>
-            <span class="float-end text-danger align-bottom"><small>IDX</small></span>
+            <a title="Remove from Watch" class="bi-trash text-danger float-end" href="#/" 
+              onclick="this.dispatchEvent(new CustomEvent('delwatch', {
+                bubbles: true, cancelable: true, detail: { inst: ${this.id} } 
+              }))" aria-label="Remove"></a>
+            <span class="float-end text-danger align-bottom"><small>IDX&nbsp;</small></span>
           </div> 
-          <div class="card-body">
+          <div class="card-body py-1">
             <div class="card-text">
               <div>IDX : 
-                <span class=${this.ltpdir <= 0 ? (this.ltpdir < 0 ? "text-danger" : "") : "text-success"}>${this.ltp}</span>
+                <span id=${"W" + this.id + "LTP"} class=${this.ltpdir <= 0 ? (this.ltpdir < 0 ? "text-danger" : "") : "text-success"}>${this.ltp}</span>
               </div>
-              <div>&nbsp;</div>
             </div>
           </div>
         </div>`;
-  }
-
-  async update(newTS=null) {
-    if (newTS) {
-      this.instrument.simulationTS = newTS;
-    }
-
-    try {
-      const resultList = await this.fetchRec(this.instrument);
-      const one = resultList.one;
-      let ltp = one.ltp;
-      if (ltp) {
-        ltp = ltp.toFixed(2);
-        this.ltpdir = ltp - this.ltp;
-        this.ltp = ltp;
-      }
-      
-      this.innerHTML = this._getCard();
-    } catch(error) {
-      console.log(error);
-      throw error;
-    }
   }
 
   async fetchRec(instrument) {
@@ -1527,18 +1595,68 @@ class IndexWatchCardElement extends HTMLDivElement {
     return await DBFacade.fetchRecs(sym.a, sym.b, sym.c, null,
       Math.floor(instrument.simulationTS / 60000) * 60, null, null, null, null);
   }
+
+  toggleToolbar() {
+    // No op
+  }
+
+  showToolbar() {
+    // No op
+  }
+
+  hideToolbar() {
+    // No op
+  }
 }
 customElements.define("index-card", IndexWatchCardElement, {extends: 'div'});
 
-class FuturesAndIndexCardsElement extends HTMLDivElement {
+class CardsWatchListElement extends HTMLDivElement {
   constructor() {
     super();
+    this.idIncr = 0;  // Continues to increment
+
+    this.addEventListener("delwatch", event => {
+      console.log("Caught delwatch in watch list");
+      this.remove(event.detail.inst);
+    });
+  }
+
+  get count() {
+    return this.children.length;
+  }
+
+  async init(options=null) {
+    
+    try {
+      let strList = await DBFacade.fetchMarketWatch();
+      if (strList) {
+        for (let i = 0; i < strList.length; i++) {
+          let inst = null;
+          if (options) {
+            inst = options.getInstrument(strList[i]);
+          } else {
+            inst = globals.symbols.makeInstrument(strList[i]);
+          }
+
+          this._append(inst);
+        }
+      }  
+    } catch (err) {
+      // Ignore error
+    }
   }
 
   getCard(instrument) {
+    // TradingInstrument or WatchCard ID
     for (let i = 0; i < this.children.length; i++) {
-      if (this.children[i].instrument && instrument.isSame(this.children[i].instrument)) {
-        return this.children[i];
+      if (instrument instanceof TradingInstrument) {
+        if (this.children[i].instrument && instrument.isSame(this.children[i].instrument)) {
+          return this.children[i];
+        }
+      } else {
+        if (this.children[i].id && instrument == this.children[i].id) {
+          return this.children[i];
+        }
       }
     }
 
@@ -1556,31 +1674,62 @@ class FuturesAndIndexCardsElement extends HTMLDivElement {
   }
 
   append(instrument) {
+    // We should not save() when first time loading from DB
+    if (this._append(instrument)) {
+      // No need to await, trigger a save and continue
+      this.save();
+    }
+  }
+
+  _append(instrument) {
     if (!instrument) {
       console.log("No instrument to make Card");
-      return;
+      return false;
     }
 
     let card = this.getCard(instrument);
     if (card) {
-      card.update(instrument.simulationTS);
-      return;
+      try {
+        card.update(instrument.simulationTS);
+      } catch(error) {
+        // Eat up the error
+      }
+
+      return false;
     }
 
-    if (instrument.isFuture) {
-      card = new FuturesWatchCardElement(instrument);
+    let id = this.idIncr++;  // ID required, to be able to search for an already existing card instrument
+    if (instrument.isOption) {
+      card = new OptionsWatchCardElement(id, instrument);
+    } else if (instrument.isFuture) {
+      card = new FuturesWatchCardElement(id, instrument);
     } else if (instrument.isIndex) {
-      card = new IndexWatchCardElement(instrument);
+      card = new IndexWatchCardElement(id, instrument);
     } else {
       throw new Error("Unsupported type of instrument for Watch List");
     }
 
     this.appendChild(card);
+
+    return true;
   }
   
+  async save() {
+    let strList = [];
+    for (let i = 0; i < this.children.length; i++) {
+      strList.push(this.children[i].instrument.strForm);
+    }
+
+    return await DBFacade.saveMarketWatch(strList);
+  }
+
   remove(instrument) {
+    console.log(instrument);
     let card = this.getCard(instrument);
     this.removeChild(card);
+
+    // trigger a save and continue
+    this.save();
   }
 
   clear() {
@@ -1590,8 +1739,14 @@ class FuturesAndIndexCardsElement extends HTMLDivElement {
   }
 
   updateAll(newTS) {
+    console.log("updateAll");
     for (let i = 0; i < this.children.length; i++) {
-      this.children[i].update(newTS);
+      try {
+        // async method, no await reqrd, we just want to initiate the updates
+        this.children[i].update(newTS).catch(error => {});  
+      } catch (error) {
+        // Ignore Errors
+      }
     }
   }
 
@@ -1618,7 +1773,292 @@ class FuturesAndIndexCardsElement extends HTMLDivElement {
     // (happens in document.adoptNode, very rarely used)
   }
 }
-customElements.define("x-data-cards", FuturesAndIndexCardsElement, {extends: 'div'});
+customElements.define("watch-cards", CardsWatchListElement, {extends: 'div'});
+
+class AutocompleteOptions extends HTMLDataListElement {
+  constructor() {
+    super();
+
+    this._optInstMap = new Map();
+    // Try loading
+    this.loadList();
+  }
+
+  async loadList(symList=null) {
+    if (!symList) {
+      symList = globals.symbols;
+    }
+
+    if (!symList) {
+      console.log("No symList in autocomp")
+      return;
+    }
+
+    while(this.firstChild) {
+      this.removeChild(this.firstChild);
+    }
+
+    let autoList = await symList.getAutocompleteList();
+    //console.log(autoList);
+    let hasStrings = false;
+    let notInstr = true;
+    for (const optVal of autoList) {
+      let strOpt = null;
+      if ( notInstr && (hasStrings || typeof(optVal) === 'string') ) {
+        // console.log("Is a String");
+        hasStrings = true;  // To short-circuit the typeof() check for performance
+        this._appendOption(optVal);
+        continue;
+      } else {
+        // optVal(s) are TradingInstrument(s)
+        // console.log("Is an Instrument");
+        notInstr = false;
+        strOpt = optVal.strForm;
+      }
+
+      if (Array.isArray(strOpt)) {
+        for (let i = 0; i < strOpt.length; i++) {
+          this._appendOption(strOpt[i], optVal);
+        }
+      } else {
+        this._appendOption(strOpt, optVal);
+      }
+    }
+  }
+
+  _appendOption(strOpt, inst=null) {
+    // console.log(`Appending ${strOpt}`);
+    strOpt = strOpt.toUpperCase();
+    const optNode = document.createElement("option");
+    optNode.value = strOpt;
+    this.appendChild(optNode);
+
+    if (inst) {
+      this._optInstMap.set(strOpt, inst);
+    }
+  }
+
+  getInstrument(strOption) {
+    return this._optInstMap.get(strOption.toUpperCase());
+  }
+}
+customElements.define("auto-options", AutocompleteOptions, {extends: 'datalist'});
+
+class StrategyListEditorHandler {
+  constructor(resdatasel, edtID, stgListID, errID) {
+    
+    if (resdatasel instanceof ResDataSelector) {
+      this.resdatasel = resdatasel;
+    } else {
+      throw new Error("Unknown type of ResDataSelector");
+    }
+
+    this.editor = document.getElementById(edtID);
+    if ( !(this.editor instanceof StrategyFullCardElement)) {
+      throw new Error("Unknown Node type of the Editor");
+    }
+
+    this.stgList = document.getElementById(stgListID);
+    if ( !(this.stgList instanceof StrategyValueCardElementList)) {
+      throw new Error("Unknown Strategy List type");
+    }
+
+    this.errID = errID;
+
+    this.editor.addEventListener("delleg", event => this.deleteLeg(event));
+    this.editor.addEventListener("delstg", event => this.deleteStrategy(event));
+    this.editor.addEventListener("savstg", event => this.saveStrategy(event));
+    this.editor.addEventListener("cpystg", event => this.saveCopyStrategy(event));
+    this.editor.addEventListener("rldstg", event => this.reloadStrategy(event));
+
+    this.stgList.addEventListener("newstg", event => this.newStrategy(event));
+    this.stgList.addEventListener("edtstg", event => this.editStrategy(event));
+    this.stgList.addEventListener("delstg", event => this.deleteStrategy(event));
+  }
+
+  newStrategy(event) {
+    // TODO : If the strategy in editor is not yet saved, we should try to raise an alert modal
+    let strategy = this.editor.current;
+    if (strategy && strategy.count > 0 && !strategy.saved) {
+      this.editor.showUnsavedWarning();
+      return;
+    }
+
+    if (strategy && globals.strategies.get(strategy.id)) {
+      this.stgList.updateCard(strategy, false); // This strategy is now moved out of editor
+    }
+
+    this.editor.update(null);  // This will create an empty editor
+  }
+
+  editStrategy(event) {
+    let stgID = event.detail.stg;
+
+    console.log("Editing stg " + stgID);
+
+    let toEdit = globals.strategies.get(stgID);
+    let curEdit = this.editor.current;
+
+    //TODO : Check if current in editor is saved or not
+    if (curEdit && curEdit.count > 0 && !curEdit.saved) {
+      this.editor.showUnsavedWarning();
+      return;
+    }
+
+    if (curEdit && curEdit.count > 0 && curEdit.id !== toEdit.id) {
+      // Update the card to remove the "in-editor" indication
+      this.stgList.updateCard(curEdit, false);
+    }
+
+    // Preserve history in the clone, as the strategy in editor will be saved back in the list
+    this.editor.update(toEdit.clone(true));
+    
+    // Update selector to show the first trade
+    this.resdatasel.updateSelectors(this.editor.current.firstTrade);
+
+    // Update the card to show the "in-editor" indication
+    this.stgList.updateCard(toEdit, true);
+  }
+
+  reloadStrategy(event) {
+    const stgID = event.detail.stg;
+
+    console.log("Reloading stg " + stgID);
+
+    const toEdit = globals.strategies.get(stgID);
+    const curEdit = this.editor.current;
+
+    if (curEdit && curEdit.count > 0 && !curEdit.saved) {
+      UIUtils.showAlert(this.errID, `Discarding changes to Strategy, ID [${stgID}]`);
+    }
+
+    if (toEdit) {
+      // Preserve history in the clone, as the strategy in editor will be saved back in the list
+      this.editor.update(toEdit.clone(true));
+      
+      // Update selector to show the first trade
+      this.resdatasel.updateSelectors(this.editor.current.firstTrade);
+
+      // Update the card to show the "in-editor" indication
+      this.stgList.updateCard(toEdit, true);
+    } else {
+      // As the current editor strategy does not exist in list, it must have been
+      //   a new strategy which is being discarded
+      this.editor.update(null);
+    }
+  }
+
+  deleteLeg(event) {
+    const stgID = event.detail.stg;
+    const legID = event.detail.leg;
+
+    console.log("Deleting leg " + legID + " of " + stgID);
+
+    let strategy = this.editor.current;
+    
+    if (strategy.id === stgID) {
+      strategy.remove(legID);      
+      this.editor.update(strategy);
+    } else {
+      console.log("strategy not found to remove leg!!");
+    }
+  }
+
+  deleteStrategy(event) {
+    const stgID = event.detail.stg;
+    const curStg = this.editor.current;
+
+    console.log("Deleting stg " + stgID);
+
+    // Remove the strategy cards from the Editor and from the card list
+    if (curStg && curStg.id === stgID) {
+      this.editor.update(null);
+    }
+
+    if (globals.strategies.get(stgID)) {
+      strategyCards.removeCard(stgID);
+      globals.strategies.delete(stgID);
+    }
+  }
+
+  saveStrategy(event) {
+    const stgID = event.detail.stg;
+    const curStg = this.editor.current;
+
+    console.log("Saving " + stgID);
+
+    // Validate whether we are adding the right one or not
+    if (curStg && curStg.count > 0 && curStg.id === stgID) {
+      if (globals.strategies.get(stgID)) {
+        // Existing strategy being udpated in the editor
+        console.log("Updating existing strategy");
+      }
+
+      // Add it even if it's already present (we put clone()s in editor)
+      try {
+        globals.strategies.add(curStg);
+        globals.strategies.save();
+
+        this.stgList.updateCard(curStg, true);  // Strategy is in Editor
+      } catch (err) {
+        UIUtils.showAlert(this.errID, `Unable to save, Error [${err}]`);
+      }
+    } else {
+      UIUtils.showAlert(this.errID, `Cannot save this strategy, ID [${stgID}]`);
+    }
+  }
+
+  saveCopyStrategy(event) {
+    const cpyStgID = event.detail.stg;
+    const curStg = this.editor.current;
+    console.log("Creating a Copy of " + cpyStgID);
+
+    if (!curStg || curStg.count === 0) {
+      UIUtils.showAlert(this.errID, `Cannot create a copy of this strategy, ID [${cpyStgID}]`);
+      return;
+    }
+
+    if (cpyStgID === curStg.id) {
+      const copy = curStg.copy();
+      try {
+        globals.strategies.add(copy);
+        globals.strategies.save();
+
+        this.stgList.updateCard(copy, false);  // Strategy is in Editor
+      } catch (err) {
+        UIUtils.showAlert(this.errID, `Unable to save, Error [${err}]`);
+      }
+    } else {
+      console.log("Current Editor ID and event IDs do not match!!");
+      UIUtils.showAlert(this.errID, `System Error : Unable to save a copy of ID [${cpyStgID}]`);
+    }
+  }
+
+  async updateAll(timestamp) {
+    let stgInEdit = this.editor.current;
+
+    // Calling editor strategy update separately as we have a clone in here or it could be a new one
+    await stgInEdit.updatePrice(timestamp, 
+      (pos) => { 
+        console.log(`Strategy updated in editor, pos [${pos}]`); 
+        this.editor.update(stgInEdit);
+      },
+      (reason) => { 
+        console.log(`Strategy in Editor failed to update [${reason}]`);
+      }
+    );
+
+    await globals.strategies.updatePrice(timestamp, 
+      (stg, pos) => { 
+        console.log(`Global strategy updated [${stg.id}:${pos}]`);
+        this.stgList.updateCard(stg, stg.id === stgInEdit.id);
+      },
+      (stg, reason) => { 
+        console.log(`Global Strategy failed to update [${stg.id}:${reason}]`);
+      }
+    );
+  }
+}
 
 class OptionChainPresenter {
   constructor() {
@@ -1762,3 +2202,4 @@ class RecordListPresenter {
     return table;
   }
 }
+

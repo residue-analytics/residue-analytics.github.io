@@ -395,13 +395,21 @@ class WebRequest {
     return this;
   }
 
+  getCalendar() {
+    this.env.res = "/data";
+    this.pay.opr = "get";
+    this.pay.ett = {"v":CalendarEntity.ver};
+
+    return this;
+  }
+
   getView(name) {
     this.env.res = "/data";
     this.pay.opr = "get";
     this.pay.cat = [name];
     this.pay.ett = {"v":"view_1.0.0"};
 
-    return this
+    return this;
   }
 
   toJSON() {
@@ -456,38 +464,12 @@ class WebResponse {
 
     return this.pay.ett;
   }
+
+  entity() {
+    return this.pay.ett;
+  }
 }
 EntityFactory.register(WebResponse.ver, WebResponse);
-
-class RecEntity {
-  static ver = "rec_1.0.0";
-  constructor() {
-    this.recs = null;
-  }
-
-  fromJSON(jsonObj) {
-    this.recs = jsonObj.l;
-
-    return this;
-  }
-
-  get length() {
-    if (this.recs) {
-      return this.recs.length;
-    }
-    
-    return 0;
-  }
-
-  get data() {
-    return this.recs;
-  }
-
-  toJSON() {
-    //TODO, if required
-  }
-}
-EntityFactory.register(RecEntity.ver, RecEntity);
 
 class XTMEntity {
   static ver = "xtm_1.0.0";
@@ -502,7 +484,7 @@ class XTMEntity {
   }
 
   get length() {
-    Object.keys(this.recs).length;
+    return Object.keys(this.recs).length;
   }
 
   get data() {
@@ -548,6 +530,68 @@ class SymEntity {
   }
 }
 EntityFactory.register(SymEntity.ver, SymEntity);
+
+class RecEntity {
+  static ver = "rec_1.0.0";
+  constructor() {
+    this.recs = null;
+  }
+
+  fromJSON(jsonObj) {
+    this.recs = jsonObj.l;
+
+    return this;
+  }
+
+  get length() {
+    if (this.recs) {
+      return this.recs.length;
+    }
+    
+    return 0;
+  }
+
+  get data() {
+    return this.recs;
+  }
+
+  toJSON() {
+    //TODO, if required
+  }
+}
+EntityFactory.register(RecEntity.ver, RecEntity);
+
+class CalendarEntity {
+  static ver = "cal_1.0.0";
+  constructor() {
+    this.data = null;
+  }
+
+  fromJSON(jsonObj) {
+    this.data = jsonObj.d;
+
+    return this;
+  }
+
+  get length() {
+    if (this.data) {
+      return Object.keys(this.data).length;
+    }
+  }
+
+  getHolidays(a, b, c) {
+    return this.data[a + "_hols_day"];
+  }
+
+  getSpecialDays(a, b, c) {
+    return this.data[a + "_spcl_day"];
+  }
+
+  getTradingDays(a, b, c) {
+    return this.data[a + b + "_twd"];
+  }
+}
+EntityFactory.register(CalendarEntity.ver, CalendarEntity);
 
 class WebError extends Error {
   constructor(sta) {
@@ -650,6 +694,11 @@ class Fetcher {
 
   static async getStrikes(exc, inst, sym, exp) {
     const webreq = new WebRequest().forXTM(exc, inst, sym).forExpiry(exp).getStrikes();
+    return Fetcher.get(webreq);
+  }
+
+  static async getCalendar(exc, inst, sym) {
+    const webreq = new WebRequest().forXTM(exc, inst, sym).getCalendar();
     return Fetcher.get(webreq);
   }
 

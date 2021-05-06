@@ -14,13 +14,14 @@ class UIUtils {
     }
 
     //parent.options.length = 0;
-    let autoList = symList.getAutocompleteList();
-    console.log(autoList);
-    for (const optVal of autoList) {
-      let optNode = document.createElement("option");
-      optNode.value = optVal;
-      parent.appendChild(optNode);
-    }
+    symList.getAutocompleteList().then( autoList => {
+      console.log(autoList);
+      for (const optVal of autoList) {
+        let optNode = document.createElement("option");
+        optNode.value = optVal;
+        parent.appendChild(optNode);
+      }
+    });
   }
 
   static updSelectDropdown(nodeID, iterOarr, datefmt = false, firstOptVal = null, firstOptText = null) {
@@ -131,7 +132,7 @@ class UIUtils {
     alert.className = 'alert alert-warning alert-dismissible fade show';
     alert.role = 'alert';
 
-    alert.innerHTML = '<strong>Holy guacamole!</strong> ' + message.toString() +
+    alert.innerHTML = '<strong>Alert!</strong> ' + message.toString() +
       '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
 
     parentDiv.appendChild(alert);
@@ -622,6 +623,7 @@ class Strategy {
     this._crtTime = Date.now();
     this._lastUpdTime = null;
     this._legs = [];
+    this.saved = false;
   }
   
   _assign(other) {
@@ -631,6 +633,7 @@ class Strategy {
     this._crtTime = other._crtTime;
     this._lastUpdTime = other._lastUpdTime;
     this._legs = other._legs;
+    this.saved = other.saved;
 
     // Nullify other (only legs and history is enough as other attributes are immutable)
     other._legs = null;
@@ -645,15 +648,16 @@ class Strategy {
     for (let i = 0; i < this._legs.length; i++) {
       newobj._legs.push(this._legs[i].clone(history));
     }
+    newobj.saved = this.saved;
 
     return newobj;
   }
 
   copy() {
-    // All attributes same except id and create time (incl of legs)
+    // All attributes same except id, create time and saved. (legs have no history)
     let newcopy = new Strategy(this._name);
-    newcopy._id = "S" + Date.now().toString();
-    newcopy._crtTime = Date.now();
+    //newcopy._id = "S" + Date.now().toString();
+    //newcopy._crtTime = Date.now();
     newcopy._lastUpdTime = this._lastUpdTime;
     for (let i = 0; i < this._legs.length; i++) {
       newcopy._legs.push(this._legs[i].copy());
@@ -698,6 +702,7 @@ class Strategy {
       if (leg.matches(this._legs[i])) {
         if (this._legs[i].update(leg)) {
           this._lastUpdTime = this._legs[i].lastUpdateTime;
+          this.saved = false;
           return true;
         } else {
           console.log("Settlement failed");
@@ -708,6 +713,7 @@ class Strategy {
 
     this._legs.push(leg);
     this._lastUpdTime = leg.lastUpdateTime;
+    this.saved = false;
 
     return true;
   }
@@ -716,6 +722,7 @@ class Strategy {
     for (let i = 0; i < this._legs.length; i++) {
       if (legID === this._legs[i].id) {
         this._legs.splice(i, 1);
+        this.saved = false;
       }
     }
   }
@@ -777,6 +784,7 @@ class Strategy {
       }
 
       this._lastUpdTime = tmstmp;
+      // this.saved = false;  // We probably need not save when only price is updated
 
       if (failure) {
         reject(reasons);
@@ -793,7 +801,9 @@ class Strategy {
   }
 
   async save() {
-    return await DBFacade.saveUserData(this);
+    let ret = await DBFacade.saveUserData(this);
+    this.saved = true;
+    return ret;
   }
 
   async delete() {
@@ -804,7 +814,10 @@ class Strategy {
     return this._id;
   }
   set id(val) {
-    this._id = val;
+    if (this._id !== val) {
+      this._id = val;
+      this.saved = false;
+    }
   }
 
   get createTime() {
@@ -815,7 +828,10 @@ class Strategy {
     return this._name;
   }
   set name(val) {
-    this._name = val;
+    if (this._name !== val) {
+      this._name = val;
+      this.saved = false;
+    }
   }
 
   get lastUpdateTime() {
@@ -916,7 +932,7 @@ class StrategyLeg {
   }
 
   copy() {
-    // All attributes are same except new id
+    // All attributes are same except new id and no history
     let newcopy = this.clone();
     newcopy._id = "L" + Date.now().toString();
 
@@ -1439,6 +1455,107 @@ class RecordPair {
   }
 }
 
+class TradingCalendar {
+  constructor() {
+    this.hols = new Map();  // a -> [Date obj]
+    this.spcl = new Map();  // b -> [Date obj]
+    this.wrkg = new Map();  // a + b -> [int]
+  }
+
+  addHolidays(sym, hols) {
+    const holidays = [];
+    for (let i = 0; i < hols.length; i++) {
+      holidays.push(DateOps.crtFromUTCYYYYMMDD(hols[i]));
+    }
+
+    this.hols.set(sym.a, holidays);
+  }
+
+  addSpecialDays(sym, days) {
+    const special = [];
+    for (let i = 0; i < days.length; i++) {
+      special.push(DateOps.crtFromUTCYYYYMMDD(days[i]));
+    }
+
+    this.spcl.set(sym.a, special);
+  }
+
+  addWorkingDays(sym, days) {
+    // We need exc and inst both in this map, [1, 2, ] : [mon, tue, ]
+    this.wrkg.set(sym.a + sym.b, days);
+  }
+
+  addWorkingHours(sym, hours) {
+    // hours - [ {s: UTC(H:M), e: UTC(H:M)}, {}, ]
+  }
+
+  isWorkingDay(sym, dt=null) {
+    // Working Day is not reliable to take decisions, as this day could be -
+    //   a holiday even though its a working day or 
+    //   a special trading day even though its not a working day
+    const days = this.wrkg.get(sym.a + sym.b);
+    if (!days) {
+      return false;
+    }
+
+    if (dt === null) {
+      // Creating local date as we are using UTC day index method
+      dt = Date.now();  
+    }
+
+    return days.includes(dt.getUTCDay() + 1);  // UTCDay() is 0 indexed
+  }
+
+  isHoliday(sym, dt=null) {
+    // A holiday is not a working day though it could be a special trading day
+    // isTradingNow the best methods to find out whether market is open currently or not
+    // isHoliday() can be used to find about the regular trading days
+
+    if (dt === null) {
+      // Creating local date, should not be a problem as comparison should still work correctly
+      dt = Date.now();  
+    }
+    
+    if (!this.isWorkingDay(sym, dt)) {
+      return true;
+    }
+
+    // If it is a working day, then it could be a holiday
+    const holidays = this.hols.get(sym.a);
+    if (holidays) {
+      for (let i = 0; i < holidays.length; i++) {
+        if (DateOps.isSameDay(dt, holidays[i])) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  isSpecialDay(sym, dt=null) {
+    if (dt === null) {
+      // Creating local date, should not be a problem as comparison should still work correctly
+      dt = Date.now();  
+    }
+
+    const special = this.spcl.get(sym.a);
+    if (special) {
+      for (let i = 0; i < special.length; i++) {
+        if (DateOps.isSameDay(dt, special[i])) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  isTradingNow() {
+
+  }
+}
+
 class Record {
   constructor(rec) {
     if (typeof (rec) === "string") {
@@ -1530,6 +1647,7 @@ class Record {
 
     if (!prc && this.O) {
       prc = (this.O + this.H + this.L + this.C) / 4;
+      prc = Number(prc.toFixed(2));
     }
 
     return prc;
@@ -1693,27 +1811,27 @@ class SymbolLeaf {
   }
 
   get isFuture() {
-    if (this._exps && this._stks.size == 0) {
+    /* if (this._exps && this._stks.size == 0) {
       return true;
     }
-    return false;
-    //return (this.b === "FUTURES")
+    return false; */
+    return (this.b === "FUTURES")
   }
 
   get isOption() {
-    if (this._exps && this._stks.size > 0) {
+    /* if (this._exps && this._stks.size > 0) {
       return true;
     }
-    return false;
-    //return (this.b === "OPTIONS")
+    return false; */
+    return (this.b === "OPTIONS")
   }
 
   get isIndex() {
-    if (!this._exps && this._stks.size == 0) {
+    /* if (!this._exps && this._stks.size == 0) {
       return true;
     }
-    return false;
-    //return (this.b === "INDEX")
+    return false; */
+    return (this.b === "INDEX")
   }
 
   setStrikes(exp, val) {
@@ -1765,26 +1883,148 @@ class SymbolLeaf {
     return null;
   }
 
-  getAutocompleteList() {
+  makeInstrument(option) {
+    console.log("leaf.makeInstrument() deprecated");
+
+    // option is the selected string, one of autocomplete list elements
+    // We don't need to fetch the data from backend as syms should already be
+    //   loaded when this option was populated in the autocomp list
+    if (!option) {
+      // This is for general use when we need an "empty" instrument
+      return new TradingInstrument(this);
+    }
+
+    option = option.toUpperCase();
+    let tokens = option.split(' ');
+
+    if ( (this.isOption && tokens.length === 4) || 
+         (this.isFuture && tokens.length === 2) || 
+         (this.isIndex && tokens.length === 1) ) {
+      if (this.c === tokens[0]) {
+        if (this.isIndex) {
+          return new TradingInstrument(this, option);
+        }
+
+        let exp = tokens[1].substr(6, 4) + tokens[1].substr(3, 2) + tokens[1].substr(0, 2);
+        for (let i = 0; i < this.expiries.length; i++) {
+          if (this.expiries[i] === exp) {
+            let inst = new TradingInstrument(this, option);
+            inst.exp = exp;
+            if (this.isOption) {
+              inst.stk = tokens[2];
+              inst.opt = tokens[3];
+            }
+
+            return inst;
+          }
+        }
+      }
+    }
+
+    //console.log(`Returning null from [${this.b}:${this.c}] `);
+    return null;
+  }
+
+  updateAutocompOption(instrument) {
+    console.log("leaf.updateAutocompOption() deprecated");
+
+    if (instrument.isOption) {
+      instrument.strForm = [instrument.sym.c, instrument.expDisplay, instrument.stk, instrument.opt].join(" ");
+      return;
+    }
+
+    if (instrument.isFuture) {
+      instrument.strForm = instrument.sym.c + " " + instrument.expDisplay;
+      return;
+    }
+
+    if (instrument.isIndex) {
+      instrument.strForm = instrument.sym.c;
+      return;
+    }
+  }
+
+  async getAutocompleteInstruments() {
     let fullList = [];
+    //console.log("Getting autocomp for " + this.c + " " + this.b);
+    if (this.isIndex) {
+      return [new TradingInstrument(this)];
+    }
+
+    if ((this.isOption || this.isFuture) && !this.expiries) {
+      await DBFacade.fetchLists(this);
+      if (this.isOption) {
+        for (let i = 0; i < this.expiries.length; i++) {
+          let exp = this.expiries[i];
+          await DBFacade.fetchLists(this, exp);
+        }
+      }
+    }
+
+    if (this.expiries) {
+      for (let i = 0; i < this.expiries.length; i++) {
+        let inst = new TradingInstrument(this);
+        inst.exp = this.expiries[i];
+
+        if (this.isFuture) {
+          fullList.push(inst);
+        } else if (this.isOption && this.getStrikes(this.expiries[i])) {
+          let stks = this.getStrikes(this.expiries[i]);
+          for (let j = 0; j < stks.length; j++) {
+            inst.stk = stks[j];
+
+            inst.opt = "CE";
+            fullList.push(inst.clone());
+
+            inst.opt = "PE";
+            fullList.push(inst.clone());
+          }
+        }
+      }
+    }
+
+    //console.log("Returning " + fullList.length);
+    return fullList;
+  }
+
+  async getAutocompleteList() {
+    console.log("leaf.getAutocompleteList() deprecated");
+
+    let fullList = [];
+    //console.log("Getting autocomp for " + this.c + " " + this.b);
+    if (this.isIndex) {
+      return [this.c];
+    }
+
+    if ((this.isOption || this.isFuture) && !this.expiries) {
+      await DBFacade.fetchLists(this);
+      if (this.isOption) {
+        for (let i = 0; i < this.expiries.length; i++) {
+          let exp = this.expiries[i];
+          await DBFacade.fetchLists(this, exp);
+        }
+      }
+    }
 
     if (this.expiries) {
       for (let i = 0; i < this.expiries.length; i++) {
         let exp = this.expiries[i];
-        exp = exp.substr(6, 2) + exp.substr(4, 2) + exp.substr(0, 4);
-        if (this.getStrikes(this.expiries[i])) {
+        // DD-MM-YYYY format
+        exp = exp.substr(6, 2) + "-" + exp.substr(4, 2) + "-" + exp.substr(0, 4);
+        if (this.isOption && this.getStrikes(this.expiries[i])) {
           let stks = this.getStrikes(this.expiries[i]);
           for (let j = 0; j < stks.length; j++) {
             let key = this.c + " " + exp + " " + stks[j];
             fullList.push(key + " CE");
             fullList.push(key + " PE");
           }
-        } else {
+        } else if (this.isFuture) {
           fullList.push(this.c + " " + exp);
         }
       }
     }
 
+    //console.log("Returning " + fullList.length);
     return fullList;
   }
 }
@@ -1828,11 +2068,29 @@ class SymbolList {
     }
   }
 
-  getAutocompleteList() {
+  makeInstrument(option) {
+    console.log("list.makeInstrument() deprecated");
+
+    // option is a string selection from the options returned from getAutocompleteList()
+    // Ask each sym leaf to attempt converting this option to instrument
+
+    for (let leaves of this.cMap.values()) {
+      for (let leaf of leaves) {
+        let instrument = leaf.makeInstrument(option);
+        if (instrument) {
+          return instrument;
+        }
+      }
+    }
+
+    console.log(`Could not make instrument for [${option}]`);
+  }
+
+  async getAutocompleteList() {
     let fullList = [];
     for (let leaves of this.cMap.values()) {
       for (let leaf of leaves) {
-        let alist = leaf.getAutocompleteList();
+        let alist = await leaf.getAutocompleteInstruments();
         if (alist.length > 0) {
           fullList = fullList.concat(alist);
         }
@@ -1861,6 +2119,333 @@ class SymbolList {
         }
       }
     }
+  }
+}
+
+DateOps.utccache = new Map();    // UTC yyyymmdd -> Date, tm -> UTC yyyymmdd
+DateOps.localcache = new Map();  // Lcl yyyymmdd -> Date, tm -> Lcl yyyymmdd
+DateOps.months = [ 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug',
+                   'Sep', 'Oct', 'Nov', 'Dec' ];
+class DateOps {
+  // All Date()s are created to be UTC unless method name says otherwise
+  // Date.UTC() returns msec since unix epoch UTC
+  static crtFromUTCYYYYMMDD(yyyymmdd) {
+    if (DateOps.utccache.get(yyyymmdd)) {
+      return DateOps.utccache.get(yyyymmdd);
+    }
+
+    if (typeof(yyyymmdd) === 'string') {
+      const yyyy = parseInt(yyyymmdd.substring(0, 4));
+      const mm = parseInt(yyyymmdd.substring(4, 2));
+      const dd = parseInt(yyyymmdd.substring(6, 2));
+      const dt = new Date(Date.UTC(yyyy, mm - 1, dd));  // Month is 0 indexed for JS Date()
+      DateOps.utccache.set(yyyymmdd, dt);
+      return dt;
+    } else if (typeof(yyyymmdd) === 'number') {
+      const dt = DateOps.crtFromUTCYYYYMMDD(yyyymmdd.toString());
+      DateOps.utccache.set(yyyymmdd, dt);
+      return dt;
+    } else {
+      throw new Error("Un-supported type for YYYYMMDD conversion");
+    }
+  }
+
+  static crtFromLocalYYYYMMDD(yyyymmdd) {
+    if (DateOps.localcache.get(yyyymmdd)) {
+      return DateOps.localcache.get(yyyymmdd);
+    }
+
+    if (typeof(yyyymmdd) === 'string') {
+      const yyyy = parseInt(yyyymmdd.substring(0, 4));
+      const mm = parseInt(yyyymmdd.substring(4, 2));
+      const dd = parseInt(yyyymmdd.substring(6, 2));
+      const dt = new Date(yyyy, mm - 1, dd);  // Month is 0 indexed for JS Date();
+      DateOps.localcache.set(yyyymmdd, dt);
+      return dt;
+    } else if (typeof(yyyymmdd) === 'number') {
+      const dt = DateOps.crtFromLocalYYYYMMDD(yyyymmdd.toString());
+      DateOps.localcache.set(yyyymmdd, dt);
+      return dt;
+    } else {
+      throw new Error("Un-supported type for YYYYMMDD conversion");
+    }
+  }
+
+  static crtFromUTCTimestamp(timestamp) {
+    // timestamp is always Unix Epoch UTC
+    // Not checking for leading zeros, as its probably unnecessary
+    // Number of digits indicate whether timestamp is in MSecs or Secs (valid till year 5138)
+    if (DateOps.utccache.get(timestamp)) {
+      return DateOps.utccache.get(timestamp);
+    }
+
+    if (typeof(timestamp) === 'string') {
+      if (timestamp.length < 12) {
+        return DateOps.crtFromUTCTimestampSecs(parseInt(timestamp));
+      } else {
+        return DateOps.crtFromUTCTimestampMSecs(parseInt(timestamp));
+      }
+    } else if (typeof(timestamp) === 'number') {
+      const len = timestamp.toString().length;
+      if (len < 12) {
+        return DateOps.crtFromUTCTimestampSecs(timestamp);
+      } else {
+        return DateOps.crtFromUTCTimestampMSecs(timestamp);
+      }
+    } else {
+      throw new Error("Un-supported type for timestamp in Date conversion")
+    }
+  }
+
+  static crtFromUTCTimestampSecs(timestamp) {
+    // timestamp is always Unix Epoch UTC
+    return DateOps.crtFromUTCTimestampMSecs(timestamp * 1000);
+  }
+
+  static crtFromUTCTimestampMSecs(timestamp) {
+    // timestamp is always Unix Epoch UTC
+    const dt = new Date(timestamp);
+    return dt
+  }
+
+  static toUTCYYYYMMDDFromDate(dt) {
+    // dt - new Date(...) object
+    const tm = dt.getTime();
+    if (DateOps.utccache.get(tm)) {
+      return DateOps.utccache.get(tm);
+    }
+
+    YYYYMMDD = dt.getUTCFullYear().toString() + 
+               ((dt.getUTCMonth() < 9) ? '0' + (dt.getUTCMonth() + 1) : (dt.getUTCMonth() + 1).toString()) + 
+               ((dt.getUTCDate() < 10) ? '0' + dt.getUTCDate() : dt.getUTCDate().toString());
+
+    DateOps.utccache.set(tm , YYYYMMDD);
+    return YYYYMMDD;
+  }
+
+  static toLocalYYYYMMDDFromDate(dt) {
+    // dt - new Date(...) object
+    const tm = dt.getTime();
+    if (DateOps.localcache.get(tm)) {
+      return DateOps.localcache.get(tm);
+    }
+
+    YYYYMMDD = dt.getFullYear().toString() + 
+               ((dt.getMonth() < 9) ? '0' + (dt.getMonth() + 1) : (dt.getMonth() + 1).toString()) + 
+               ((dt.getDate() < 10) ? '0' + dt.getDate() : dt.getDate().toString());
+
+    DateOps.localcache.set(tm, YYYYMMDD);
+    return YYYYMMDD;
+  }
+
+  static toUTCPIDisplayFromUTCYYYYMMDD(yyyymmdd) {
+    const dt = DateOps.crtFromUTCYYYYMMDD(yyyymmdd);
+    return DateOps.months[dt.getUTCMonth()] + " " + dt.getUTCDate() + " " + dt.getUTCFullYear();
+  }
+
+  static toLocalPIDisplayFromUTCYYYYMMDD(yyyymmdd) {
+    const dt = DateOps.crtFromUTCYYYYMMDD(yyyymmdd);
+    return DateOps.months[dt.getMonth()] + " " + dt.getDate() + " " + dt.getFullYear();
+  }
+
+  static toUTCPIDisplayFromLocalYYYYMMDD(yyyymmdd) {
+    const dt = DateOps.crtFromLocalYYYYMMDD(yyyymmdd);
+    return DateOps.months[dt.getUTCMonth()] + " " + dt.getUTCDate() + " " + dt.getUTCFullYear();
+  }
+
+  static toLocalPIDisplayFromLocalYYYYMMDD(yyyymmdd) {
+    const dt = DateOps.crtFromLocalYYYYMMDD(yyyymmdd);
+    return DateOps.months[dt.getMonth()] + " " + dt.getDate() + " " + dt.getFullYear();
+  }
+
+  static isSameDay(a, b) {
+    // Compare the day portion only. 
+    // It should not matter whether we use UTC or Local as long as we use the same method
+    //   on both the date objects (Internally both objects are based on UTC timestamps).
+    return a.getUTCFullYear() === b.getUTCFullYear() &&
+      a.getUTCMonth() === b.getUTCMonth() &&
+      a.getUTCDate()=== b.getUTCDate()
+  }
+}
+
+class TradingInstrument {
+  constructor(sym=null, strForm=null) {
+    // If constructed without a sym, almost all operations will fail
+    this._sym = sym;
+    this._strForm = strForm;  // In the autocomp format
+    // this._exp = null;
+    // this._expDisp = null;
+    // this._stk = null;
+    // this._opt = null;
+    // this._simDt = null;
+    // this._simDtYYYYMMDD = null;
+  }
+
+  clone() {
+    let obj = new TradingInstrument(this._sym, this._strForm);
+    if (this.exp) {
+      obj.exp = this.exp;
+    }
+    obj._stk = this._stk;
+    obj._opt = this._opt;
+    obj._simDt = this._simDt;
+
+    return obj;
+  }
+
+  async makeFuture(deferMonth=0) {
+    // Create a Future Instrument based on this instrument and its simulation Date
+    let futSym = globals.symbols.getLeaf(this.sym.a, "FUTURES", this.sym.c);
+    if (!futSym) {
+      return null;
+    }
+
+    await DBFacade.fetchLists(futSym);  // This will update the required data in sym
+    
+    let exp = futSym.getMonthlyExpiry(this.simulationDateYYYYMMDD, deferMonth);
+    if (exp) {
+      let futInst = new TradingInstrument(futSym);
+      futInst.exp = exp;
+      futInst.simulationTS = this.simulationTS;
+      return futInst;
+    }
+
+    return null;
+  }
+
+  async makeIndex(idx=this.sym.c) {
+    let idxSym = globals.symbols.getLeaf(this.sym.a, "INDEX", idx);
+    if (!idxSym) {
+      return null;
+    }
+
+    await DBFacade.fetchLists(idxSym);
+    
+    let idxInst = new TradingInstrument(idxSym);
+    idxInst.simulationTS = this.simulationTS;
+
+    return idxInst;
+  }
+
+  get sym() {
+    return this._sym;
+  }
+
+  get strForm() {
+    if (!this._strForm) {
+      // We assume sym and other data is present
+      // this.sym.updateAutocompOption(this);
+      if (this.isOption) {
+        this._strForm = [this.sym.c, this.expDisplay, this.stk, this.opt].join(" ");
+        return this._strForm;
+      }
+  
+      if (this.isFuture) {
+        this._strForm = this.sym.c + " " + this.expDisplay;
+        return this._strForm;
+      }
+  
+      if (this.isIndex) {
+        this._strForm = this.sym.c;
+        return this._strForm;
+      }
+    }
+
+    return this._strForm;
+  }
+  set strForm(val) {
+    // As we don't have exchange yet, we cannot convert val to sym
+    this._strForm = val;
+  }
+
+  set exp(val) {
+    this._exp = val;
+    this._expDisp = val.substr(6, 2) + "-" + val.substr(4, 2) + "-" + val.substr(0, 4);
+  }
+  get exp() {  // YYYYMMDD
+    return this._exp;
+  }
+  get expDisplay() {
+    return this._expDisp
+  }
+
+  set stk(val) {
+    this._stk = val.toString();
+  }
+  get stk() {
+    return this._stk;
+  }
+
+  set opt(val) {
+    this._opt = val;
+  }
+  get opt() {
+    return this._opt;
+  }
+
+  get isFuture() {
+    return this.sym.isFuture;  // Now these getters are comparing the inst
+  }
+
+  get isOption() {
+    return this.sym.isOption;  // Now these getters are comparing the inst
+  }
+
+  get isIndex() {
+    return this.sym.isIndex;  // Now these getters are comparing the inst
+  }
+
+  get simulationTS() {
+    return this._simDt;  // Number 
+  }
+  get simulationDate() {
+    return new Date(this._simDt);
+  }
+  get simulationDateYYYYMMDD() {  // YYYYMMDD format (UTC)
+    if (this._simDtYYYYMMDD) {
+      return this._simDtYYYYMMDD;
+    }
+
+    const dt = this.simulationDate;
+    this._simDtYYYYMMDD = dt.getUTCFullYear().toString() + ((dt.getUTCMonth() < 9) ? '0' + (dt.getUTCMonth() + 1) : (dt.getUTCMonth() + 1).toString()) + ((dt.getUTCDate() < 10) ? '0' + dt.getUTCDate() : dt.getUTCDate().toString());
+
+    return this._simDtYYYYMMDD;
+  }
+  set simulationTS(val) {
+    if (typeof(val) === "number") {
+      this._simDt = val;
+      this._simDtYYYYMMDD = null;
+      return;
+    }
+
+    if (typeof(val) === "string") {
+      const ts = parseInt(val);
+      if (!isNan(ts)) {
+        this._simDt = ts;
+        this._simDtYYYYMMDD = null;
+        return;
+      }
+    }
+
+    throw new Error(`Invalid Simulation Timestamp ${val.toString()} type ${typeof(val)}`);
+  }
+
+  isSame(other) {
+    if (this.sym === other.sym) {  // No need to compare a, b & c. sym are global
+      if (this.isIndex) {
+        return true;
+      }
+      if (this.exp === other.exp) {
+        if (this.isFuture) {
+          return true;
+        }
+        if (this.stk === other.stk && this.opt === other.opt) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 }
 
@@ -2736,6 +3321,7 @@ class OptionsDB extends DataDB {
     } else {
       dttm = reqDt;
     }
+
     for (let i = 0; i < stks.length; i++) {
       for (let j = 0; j < opts.length; j++) {
         let id = dttm.toString() + ":" + stks[i].toString() + ":" + opts[j];
@@ -2832,6 +3418,21 @@ class ListsDB {
     return null;
   }
 
+  async fetchHolidays(sym) {
+    let doc = await this.get(sym.a + "_hols_day");
+    return doc["data"];
+  }
+
+  async fetchSpecialDays(sym) {
+    let doc = await this.get(sym.a + "_spcl_day");
+    return doc["data"];
+  }
+
+  async fetchTradindDays(sym) {
+    let doc = await this.get(sym.a + sym.b + "_twd");
+    return doc["data"];
+  }
+
   async saveSyms(syms) {
     await this.save("symbols", syms, true);  // Do a pre-check, update rev and save
   }
@@ -2856,6 +3457,24 @@ class ListsDB {
     if (name) {
       await this.save("DBLIST", name, true, true);
     }
+  }
+
+  async saveCalendar(sym, entity) {
+    await this.saveHolidays(sym, entity.getHolidays(sym.a, sym.b, sym.c));
+    await this.saveSpecialDays(sym, entity.getSpecialDays(sym.a, sym.b, sym.c));
+    await this.saveTradingDays(sym, entity.getTradingDays(sym.a, sym.b, sym.c));
+  }
+
+  async saveHolidays(sym, hols) {
+    await this.save(sym.a + "_hols_day", hols, true);
+  }
+
+  async saveSpecialDays(sym, days) {
+    await this.save(sym.a + "_spcl_day", days, true);
+  }
+
+  async saveTradingDays(sym, days) {
+    await this.save(sym.a + sym.b + "_twd", days, true);
   }
 
   async remDB(name) {
@@ -2994,6 +3613,19 @@ class UserDB {
     return await this.delete(doc);
   }
 
+  async fetchMarketWatch(owner, id) {
+    let doc = await this._get(this.crtUserRecID(id, owner, "mktd"));
+    return doc["$d"];
+  }
+
+  async saveMarketWatch(owner, data) {
+    if (owner && data) {
+      return await this._save(this.crtUserRecord(data, owner, "mktd"), true);
+    }
+
+    return false;
+  }
+
   async destroy() {
     // Returns boolean
     let resp = await this.db.destroy().catch(function (err) { throw new DBError("Unable to destroy [" + this.name + "]", err) });
@@ -3031,6 +3663,10 @@ class UserDB {
   }
 
   async delete(doc) {
+    if (!doc) {
+      return true;
+    }
+
     if (doc._deleted === undefined || doc._deleted === null) {
       doc._deleted = true;
     }
@@ -3272,8 +3908,6 @@ class DBFacade {
           return { days: sym.getDays() };
         }
 
-
-
         let data = null;
         try {
           data = await DBFacade.listsDB.fetchExpiries(sym);
@@ -3319,6 +3953,30 @@ class DBFacade {
     return { stks: sym.getStrikes(d), days: sym.getDays(d) };
   }
 
+  static async fetchCalendar(sym) {
+    let cal = new TradingCalendar();
+    let hols = null;
+    let spcl = null;
+    let wrkg = null;
+    try {
+      hols = await DBFacade.listsDB.fetchHolidays(sym);
+      spcl = await DBFacade.listsDB.fetchSpecialDays(sym);
+      wrkg = await DBFacade.listsDB.fetchTradingDays(sym);
+    } catch (err) {
+      let response = await Fetcher.getCalendar(sym.a, sym.b, sym.c);
+      DBFacade.listsDB.saveCalendar(sym, response.entity());
+      hols = response.entity().getHolidays(sym.a, sym.b, sym.c);
+      spcl = response.entity().getSpecialDays(sym.a, sym.b, sym.c);
+      wrkg = response.entity().getTradingDays(sym.a, sym.b, sym.c);
+    }
+
+    cal.addHolidays(sym, hols);
+    cal.addSpecialDays(sym, spcl);
+    cal.addWorkingDays(sym, wrkg);
+
+    return cal;
+  }
+
   static async fetchUserData(data) {
     let db = new UserDB();
     if (data instanceof StrategyList) {
@@ -3347,6 +4005,27 @@ class DBFacade {
     } else if (data instanceof StrategyList) {
       console.log("Deletion of StrategyList is not implemented")
     }
+  }
+
+  static async fetchMarketWatch() {
+    let db = new UserDB();
+
+    let data = await db.fetchMarketWatch(globals.username, "md");
+    if (data) {
+      // console.log("Found Market Watch [" + data.l + "]");
+      return data.l;
+    }
+
+    return null;
+  }
+
+  static async saveMarketWatch(strList) {
+    let db = new UserDB();
+    let obj = {
+      "id" : "md",
+      "l"  : strList
+    };
+    return await db.saveMarketWatch(globals.username, obj);
   }
 }
 
