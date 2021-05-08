@@ -155,8 +155,9 @@
                   <select class="form-select" id="days"></select>
                   <label class="form-label" for="days">Date</label>
                 </div>
-                <div>
-                  <input id="date-picker" type="text" class="form-control">
+                <div title="Set Simulation Start Date" class="form-floating">
+                  <input id="simdate-picker" type="text" class="form-control">
+                  <label for="simdate-picker">Date</label>
                 </div>
               </div>
 
@@ -354,7 +355,7 @@
     function setLayout() {
       UIUtils.addSpinner("buy"); UIUtils.addSpinner("sell");
 
-      $("#date-picker").datepicker();
+      //$("#simdate-picker").datepicker();
 
       autocomp = document.getElementById("autocompleteOptions");
       watchlist = document.getElementById("watchlist");
@@ -365,7 +366,11 @@
       
       selector.cacheAllSelectors().then(data => {
         // Load in background, no visual indication
-        autocomp.loadList(data).then(() => { watchlist.init(autocomp); });
+        autocomp.loadList(data).then(() => { 
+          watchlist.init(autocomp);
+        });
+        
+        globals.symbols.loadCalendar();
 
         DBFacade.fetchUserData(new StrategyList("editor", "strategyCards")).then(stgs => {
           globals.strategies = stgs;

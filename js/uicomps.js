@@ -17,6 +17,48 @@ class Trade {
   }
 }
 
+class ResDatePicker {
+  constructor(nodeID) {
+    this.id = nodeID;
+    this.dates = [];
+    this.init();
+  }
+
+  init() {
+    this.node = document.getElementById(this.id);
+    $(this.node).datepicker({
+      format: "dd-M-yyyy",
+      beforeShowDay: (d) => this.showDay(d)
+    });
+    $(this.node).datepicker().on("changeDate", function(evt) {
+      console.log(evt.date);
+    });
+  }
+
+  updateDates(dates) {
+    this.dates = dates.map( d => DateOps.crtUTCFromUTCYYYYMMDD(d) );
+    //console.log("update dates " + this.dates);
+    //$(this.node).datepicker('update', dates.map( d => DateOps.crtLocalFromUTCYYYYMMDD(d) ));
+  }
+
+  showDay(d) {
+    //console.log("showDay " + d);
+    for (let i = 0; i < this.dates.length; i++) {
+      if (DateOps.isSameDate(d, this.dates[i])) {
+        //console.log("true");
+        return true;
+      }
+    }
+
+    //console.log("false");
+    return false;
+  }
+
+  addEventListener(evt, func) {
+    $(this.node).datepicker().on(evt, func);
+  }
+}
+
 class ResDataSelector {
   constructor(excID, instID, undID, expID, stkID, cepeID, daysID, dateSliderID, 
     timeSliderID, errID, dataRefreshCallback, disablePageCallback, enablePageCallback,
@@ -56,6 +98,8 @@ class ResDataSelector {
     this.dateSliderEl = document.getElementById(this.dateSliderID);
     this.timeSliderEl = document.getElementById(this.timeSliderID);
     this.errEl    = document.getElementById(this.errID);
+
+    this.simDatePicker = new ResDatePicker("simdate-picker");
 
     if (this.dateSliderEl) {
       let initDates = ["01-01-2021", "01-02-2021", "01-03-2021"];
@@ -126,6 +170,8 @@ class ResDataSelector {
 
     this.daysEl.addEventListener('change', ev => this.updateDatetimeSlider(ev));
     this.daysEl.addEventListener('update-sel', ev => this.updateDatetimeSlider(ev));
+
+    this.simDatePicker.addEventListener('change', ev => this.updateDatetimeSlider(ev));
   }
 
   loadExchanges(trade=null) {
@@ -314,6 +360,7 @@ class ResDataSelector {
       DBFacade.fetchLists(leaf, exp).then(data => {
         if (data.days) {
           UIUtils.updSelectDropdown(this.daysID, data.days, true);
+          this.simDatePicker.updateDates(data.days);
           //UIUtils.updateDatetimeSlider(this.sliderID, this.daysID, true);  // SingleThumb?
           if (event.detail && event.detail.trade) {
             this.daysEl.value = event.detail.trade.day;

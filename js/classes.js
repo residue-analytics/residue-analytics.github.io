@@ -587,8 +587,32 @@ class CalendarEntity {
     return this.data[a + "_spcl_day"];
   }
 
+  getSpecialDaysNHours(a, b, c) {
+    // returns a map => { spcl day -> [ {}, {}, ] }
+    const spclDays = this.getSpecialDays(a, b, c);
+    if (spclDays) {
+      const retMap = new Map();
+      for (let i = 0; i < spclDays.length; i++) {
+        retMap.set( spclDays[i], this.getSpecialHours(a, b, c, spclDays[i]) );
+      }
+
+      return retMap;
+    }
+
+    return null;
+  }
+
+  getSpecialHours(a, b, c, day) {
+    // day must be as we got from the server
+    return this.data[a + "_spcl_" + day + "_twh"];
+  }
+
   getTradingDays(a, b, c) {
     return this.data[a + b + "_twd"];
+  }
+
+  getTradingHours(a, b, c) {
+    return this.data[a + b + "_twh"];
   }
 }
 EntityFactory.register(CalendarEntity.ver, CalendarEntity);

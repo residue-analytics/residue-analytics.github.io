@@ -505,6 +505,7 @@ class GlobalData {
     this._usr = "residue";
     this._stgList = null;
     this._syms = null;
+    this._cal = null;
   }
 
   get username() {
@@ -526,6 +527,13 @@ class GlobalData {
   }
   set symbols(val) {
     this._syms = val;
+  }
+
+  get calendar() {
+    return this._cal;
+  }
+  set calendar(val) {
+    this._cal = val;
   }
 }
 var globals = new GlobalData();
@@ -1455,17 +1463,112 @@ class RecordPair {
   }
 }
 
+/* class UTCDate {
+  constructor(yyyy=null, mm=null, dd=null, h=null, m=null, s=null, ms=null) {
+    // Arguments are 
+    this.utc = null;
+    if (!yyyy) {
+      this.utc = new Date(Date.now());
+    } else {
+      let dt = new Date(yyyy, mm, dd, h, m, s, ms);
+      this.utc = new Date(dt.getTime());
+    }
+  }
+} */
+
+class TradingSession {
+  constructor(start, end) {
+    if (typeof(start) === 'number') {
+      this.start = DateOps.crtUTCFromUTCTimestampSecs(start);
+    } else if (start instanceof Date) {
+      this.start = new Date(start);
+    } else if (typeof(start) === 'string') {
+      this.start = DateOps.crtUTCFromUTCTimestampSecs(parseInt(start));
+    } else {
+      throw new Error("Invalid start date type");
+    }
+    
+    if (typeof(end) === 'number') {
+      this.end = DateOps.crtUTCFromUTCTimestampSecs(end);
+    } else if (end instanceof Date) {
+      this.end = new Date(end);
+    } else if (typeof(end) === 'string') {
+      this.end = DateOps.crtUTCFromUTCTimestampSecs(parseInt(end));
+    } else {
+      throw new Error("Invalid end date type");
+    }
+
+    if (end <= start) {
+      throw new Error("Invalid Trading Session, end is lte start");
+    }
+  }
+
+  clone() {
+    return new TradingSession(this.start, this.end);
+  }
+
+  isWithin(dt) {
+    if (dt instanceof Date) {
+      // is dt within this session's start and end
+      return (this.start <= dt && this.end >= dt);
+    } else {
+      // Whether this session is within the other session
+      return other.isWithin(self.start) && other.isWithin(self.end);
+    }
+  }
+
+  areOverlapping(other) {
+    // overlapping or within
+    return ( this.isWithin(other.start) || this.isWithin(other.end) );
+  }
+
+  sequence(other) {
+    // return -1 when self is before other
+    // return  0 when self is same or within other
+    // return  1 when self is after other
+    if ( this.isWithin(other) || other.isWithin(this) ) {
+      return 0;
+    }
+
+    if (this.areOverlapping(other)) {
+      if (this.start < other.start || this.end < other.end) {
+        return -1;
+      }
+      if (this.start > other.start || this.end > other.end) {
+        return 1;
+      }
+    }
+
+    if (this.end < other.start) {
+      return -1;
+    } else {
+      return 1;
+    }
+  }
+}
+
 class TradingCalendar {
   constructor() {
     this.hols = new Map();  // a -> [Date obj]
-    this.spcl = new Map();  // b -> [Date obj]
+    this.spcl = new Map();  // a -> [Date obj]
     this.wrkg = new Map();  // a + b -> [int]
+    this.wrkh = new Map();  // a + b -> [ { s: secs, e: secs }, {}, {}, ]
+
+    // a -> { yyyymmdd -> sorted [ TradingSession, TradingSession, ], yyyymmdd -> [obj, obj], }
+    this.spch = new Map();
+  }
+
+  hasCalendar(sym) {
+    if (this.wrkg.has(sym.a + sym.b)) {
+      return true;
+    }
+    return false;
   }
 
   addHolidays(sym, hols) {
     const holidays = [];
     for (let i = 0; i < hols.length; i++) {
-      holidays.push(DateOps.crtFromUTCYYYYMMDD(hols[i]));
+      holidays.push(DateOps.crtUTCFromUTCYYYYMMDD(hols[i]));
     }
 
     this.hols.set(sym.a, holidays);
@@ -1474,22 +1577,96 @@ class TradingCalendar {
   addSpecialDays(sym, days) {
     const special = [];
     for (let i = 0; i < days.length; i++) {
-      special.push(DateOps.crtFromUTCYYYYMMDD(days[i]));
+      special.push(DateOps.crtUTCFromUTCYYYYMMDD(days[i]));
     }
 
     this.spcl.set(sym.a, special);
   }
 
+  addSpecialDNH(sym, daysNHours) {
+    // daysNHours => { day (YYYYMMDD) -> [ {s: Epoch int, e: Epoch int}, {}, ]}
+    const days = [];
+    const aList = [];
+    const finalDNH = new Map();
+    for (let [day, hrs] of daysNHours) {
+      days.push(day);
+      const hours = [];
+      for (let i = 0; i < hrs.length; i++) {
+        hours.push( new TradingSession(hrs[i]["s"], hrs[i]["e"]) );
+        //hours.push( { "s" : DateOps.crtUTCFromUTCTimestampSecs(hrs[i]["s"]), 
+        //              "e" : DateOps.crtUTCFromUTCTimestampSecs(hrs[i]["e"]) } );
+      }
+
+      hours.sort( (a, b) => a.sequence(b));
+      finalDNH.set(day, hours);
+    }
+
+    this.addSpecialDays(sym, days);
+    this.spch.set(sym.a, finalDNH);
+  }
+
   addWorkingDays(sym, days) {
-    // We need exc and inst both in this map, [1, 2, ] : [mon, tue, ]
-    this.wrkg.set(sym.a + sym.b, days);
+    // We need exc and inst both in this map, [1, 2, .., 7] : [mon, tue, .., sun]
+    // Translate this to JS convention - [0, 1, .., 6] : [sun, mon, .., sat]
+    const wdays = [];
+    console.log("Adding wotking days for " + sym.b + sym.c);
+    for (let i = 0; i < days.length; i++) {
+      if (days[i] == 7) {
+        wdays.push(0);
+      } else {
+        wdays.push(days[i]);
+      }
+    }
+    this.wrkg.set(sym.a + sym.b, wdays);
   }
 
   addWorkingHours(sym, hours) {
-    // hours - [ {s: UTC(H:M), e: UTC(H:M)}, {}, ]
+    const hrList = [];
+    // hours - [ {s: UTC 24hr (H:M), e: UTC 24hr (H:M)}, {}, ]
+    for (let i = 0; i < hours.length; i++) {
+      let {s, e} = hours[i];  // destructuring assignment
+      const tmpList = [s, e];
+      tmpList.forEach( (o, i, a) => {
+        if (o.length <= 2) {
+          a[i] = parseInt(o) * 3600; // Only HHH given, Convert to seconds
+        } else if (o.length <= 5) {
+          // H:M given, H * 120 + S * 60
+          a[i] = o.split(":").reduce((acc, cur) => {return parseInt(acc) * 3600 + parseInt(cur) * 60} );
+        } else if (o.length <= 8) {
+          a[i] = o.split(":").reduce((acc, cur) => {return parseInt(acc) * 60 + parseInt(cur)} );
+        } else {
+          throw new Error("Invalid Working hours, too long");
+        }
+      });
+      
+      hrList.push( { "s" : tmpList[0], 
+                     "e" : tmpList[1] } );
+    }
+
+    hrList.sort( function(a, b) {
+      // regular day sessions cannot be overlapping, so ignoring those cases
+
+      // return -1 when a is before b
+      // return  0 when a is same or within b
+      // return  1 when a is after b
+      if (a.s < b.s && a.e < b.e)   { return -1; }
+      if (a.s == b.s && a.e == b.e) { return 0; }
+      if (b.s < a.s && b.e < a.e)   { return 1; }
+
+      if        (a.s < b.s) { return -1;
+      } else if (b.s < a.s) { return 1;
+      } else {
+        if      (a.e < b.e) { return -1;
+        } else              { return 1; }
+      }
+
+      return 0;
+    } );
+
+    this.wrkh.set(sym.a + sym.b, hrList);
   }
 
-  isWorkingDay(sym, dt=null) {
+  isWorkingDay(sym, dt) {
     // Working Day is not reliable to take decisions, as this day could be -
     //   a holiday even though its a working day or 
     //   a special trading day even though its not a working day
@@ -1498,24 +1675,33 @@ class TradingCalendar {
       return false;
     }
 
-    if (dt === null) {
-      // Creating local date as we are using UTC day index method
-      dt = Date.now();  
-    }
-
-    return days.includes(dt.getUTCDay() + 1);  // UTCDay() is 0 indexed
+    return days.includes(dt.getUTCDay());
   }
 
-  isHoliday(sym, dt=null) {
-    // A holiday is not a working day though it could be a special trading day
-    // isTradingNow the best methods to find out whether market is open currently or not
-    // isHoliday() can be used to find about the regular trading days
+  isWorkingNow(sym, dt) {
+    // Is this moment a working moment, on minutes boundary (working days & working hours)
 
-    if (dt === null) {
-      // Creating local date, should not be a problem as comparison should still work correctly
-      dt = Date.now();  
+    if (this.isWorkingDay(sym, dt)) {
+      const elapsedSecs = DateOps.elapsedSecondsSinceUTCDayStart(dt);
+      const hrRanges = this.wrkh.get(sym.a + sym.b);
+      if (hrRanges) {
+        for (let i = 0; i < hrRanges.length; i++) {
+          if (hrRanges.s <= elapsedSecs && hrRanges.e >= elapsedSecs) {
+            return true;
+          }
+        }
+      }
     }
-    
+
+    return false;
+  }
+
+  isHoliday(sym, dt) {
+    // A holiday is not a working day though it could be a special trading day
+    // isTradingXXX() are the best methods to find about the market sessions
+
+    // !isHoliday() can be used to find about the regular trading days
+
     if (!this.isWorkingDay(sym, dt)) {
       return true;
     }
@@ -1524,7 +1710,7 @@ class TradingCalendar {
     const holidays = this.hols.get(sym.a);
     if (holidays) {
       for (let i = 0; i < holidays.length; i++) {
-        if (DateOps.isSameDay(dt, holidays[i])) {
+        if (DateOps.isSameDate(dt, holidays[i])) {
           return true;
         }
       }
@@ -1533,16 +1719,11 @@ class TradingCalendar {
     return false;
   }
 
-  isSpecialDay(sym, dt=null) {
-    if (dt === null) {
-      // Creating local date, should not be a problem as comparison should still work correctly
-      dt = Date.now();  
-    }
-
+  isSpecialDay(sym, dt) {
     const special = this.spcl.get(sym.a);
     if (special) {
       for (let i = 0; i < special.length; i++) {
-        if (DateOps.isSameDay(dt, special[i])) {
+        if (DateOps.isSameDate(dt, special[i])) {
           return true;
         }
       }
@@ -1551,8 +1732,138 @@ class TradingCalendar {
     return false;
   }
 
-  isTradingNow() {
+  isSpecialTradingNow(sym, dt) {
+    if (this.getSpecialTradingSessionOn(sym, dt)) {
+      return true;
+    }
 
+    return false;
+  }
+
+  getSpecialTradingSessionOn(sym, dt) {
+    // If dt is within a special trading session, then return the session
+    // We do not need to use isSpecialDay()
+    const dnh = this.spch.get(sym.a);
+    if (dnh) {
+      const hours = dnh.get(DateOps.toUTCYYYYMMDDFromDate(dt));
+      if (hours) {
+        // This is a special day
+        for (let i = 0; i < hours.length; i++) {
+          if (hours[i].isWithin(dt)) {
+            return hours[i];
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  nextSpecialTradingSessionOn(sym, dt) {
+    // If dt is on a special day then we return the next special trading session
+    // If dt is not on a special day, we return null
+    const dnh = this.spch.get(sym.a);
+    if (dnh) {
+      const hours = dnh.get(DateOps.toUTCYYYYMMDDFromDate(dt));  // sorted array
+      if (hours) {
+        // This is a special day
+        for (let i = 0; i < hours.length; i++) {
+          // TradingSessions (hours) are sorted in ascending order
+          if (dt <= hours[i].start) {
+            return hours[i].clone();
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  // All the public useful methods below
+
+  isTradingDay(sym, dt) {
+    if (!this.isHoliday(sym, dt) || this.isSpecialDay(sym, dt)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  isTradingNow(sym, dt) {
+    // Some special days are on working days also (like rare exchange outages)
+    if (this.isSpecialDay(sym, dt)) {
+      return this.isSpecialTradingNow(sym, dt);
+    } else {
+      return this.isWorkingNow(sym, dt);
+    }
+  }
+
+  getTradingSessionOn(sym, dt) {
+    // Get a trading session which overlaps the provided Date & Time
+    // Some special days are on working days also (like rare exchange outages)
+    if (this.isSpecialDay(sym, dt)) {
+      return this.getSpecialTradingSessionOn(sym, dt);
+    } else if (this.isWorkingDay(sym, dt)) {
+      const hrRanges = this.wrkh.get(sym.a + sym.b);
+      if (hrRanges) {
+        const elapsedSecs = DateOps.elapsedSecondsSinceUTCDayStart(dt);
+        for (let i = 0; i < hrRanges.length; i++) {
+          if (hrRanges[i].s <= elapsedSecs && hrRanges[i].e >= elapsedSecs) {
+            const start = DateOps.crtUTCDateRollbackToUTCDayStart(dt); 
+            start.setUTCSeconds(hrRanges[i].s);
+            const end = DateOps.crtUTCDateRollbackToUTCDayStart(dt);
+             end.setUTCSeconds(hrRanges[i].e);
+            return new TradingSession(start, end);
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  nextTradingSessionOn(sym, dt) {
+    // Get a trading session which comes after (non-overlapping) the dt, date-time
+    // Some special days are on working days also (like rare exchange outages)
+    if (this.isSpecialDay(sym, dt)) {
+      return this.nextSpecialTradingSessionOn(sym, dt);
+    } else if (this.isWorkingDay(sym, dt)) {
+      const hrRanges = this.wrkh.get(sym.a + sym.b);
+      if (hrRanges) {
+        const elapsedSecs = DateOps.elapsedSecondsSinceUTCDayStart(dt);
+        let foundCur = false;
+        for (let i = 0; i < hrRanges.length; i++) {
+          if (elapsedSecs < hrRanges[i].s ) {
+            const start = DateOps.crtUTCDateRollbackToUTCDayStart(dt);
+            start.setUTCSeconds(hrRanges[i].s);
+            const end = DateOps.crtUTCDateRollbackToUTCDayStart(dt);
+            end.setUTCSeconds(hrRanges[i].e);
+            return new TradingSession(start, end);
+          } 
+        }
+      }
+    }
+
+    return null;
+  }
+
+  nextTradingDate(sym, dt) {
+    let next = DateOps.crtUTCDateWithDeltaDays(dt, 1);  // Move ahead by 1 day
+    while (this.isHoliday(sym, next) && !this.isSpecialDay(sym, next)) {
+      next = DateOps.addDeltaUTCDays(next, 1);  // No need to assign though, but for clarity
+    }
+
+    // Return start of the UTC day
+    return DateOps.crtUTCDateRollbackToUTCDayStart(next);
+  }
+
+  nextTradingSession(sym, dt) {
+    let next = this.nextTradingSessionOn(sym, dt);
+    if (next) {
+      return next;
+    }
+
+    return this.nextTradingSession(sym, this.nextTradingDate(sym, dt));
   }
 }
 
@@ -2101,6 +2412,15 @@ class SymbolList {
     //return new Set(fullList.sort());
   }
 
+  async loadCalendar() {
+    for (let leaves of this.cMap.values()) {
+      for (let leaf of leaves) {
+        // DBFacade updates the globals.calendar
+        await DBFacade.fetchCalendar(leaf);
+      }
+    }
+  }
+
   load(tree) {
     for (let a in tree) {
       for (let b in tree[a]) {
@@ -2122,56 +2442,64 @@ class SymbolList {
   }
 }
 
-DateOps.utccache = new Map();    // UTC yyyymmdd -> Date, tm -> UTC yyyymmdd
-DateOps.localcache = new Map();  // Lcl yyyymmdd -> Date, tm -> Lcl yyyymmdd
-DateOps.months = [ 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug',
-                   'Sep', 'Oct', 'Nov', 'Dec' ];
 class DateOps {
   // All Date()s are created to be UTC unless method name says otherwise
   // Date.UTC() returns msec since unix epoch UTC
-  static crtFromUTCYYYYMMDD(yyyymmdd) {
+  static crtUTCFromUTCYYYYMMDD(yyyymmdd) {
     if (DateOps.utccache.get(yyyymmdd)) {
       return DateOps.utccache.get(yyyymmdd);
     }
 
     if (typeof(yyyymmdd) === 'string') {
       const yyyy = parseInt(yyyymmdd.substring(0, 4));
-      const mm = parseInt(yyyymmdd.substring(4, 2));
-      const dd = parseInt(yyyymmdd.substring(6, 2));
+      const mm = parseInt(yyyymmdd.substring(4, 6));
+      const dd = parseInt(yyyymmdd.substring(6, 8));
       const dt = new Date(Date.UTC(yyyy, mm - 1, dd));  // Month is 0 indexed for JS Date()
-      DateOps.utccache.set(yyyymmdd, dt);
+      DateOps.utccache.set(yyyymmdd, dt);  // Add string -> dt
       return dt;
     } else if (typeof(yyyymmdd) === 'number') {
-      const dt = DateOps.crtFromUTCYYYYMMDD(yyyymmdd.toString());
-      DateOps.utccache.set(yyyymmdd, dt);
+      const dt = DateOps.crtUTCFromUTCYYYYMMDD(yyyymmdd.toString());
+      DateOps.utccache.set(yyyymmdd, dt);  // Add number -> dt
       return dt;
     } else {
       throw new Error("Un-supported type for YYYYMMDD conversion");
     }
   }
 
-  static crtFromLocalYYYYMMDD(yyyymmdd) {
+  static crtLocalFromUTCYYYYMMDD(yyyymmdd) {
+    if (typeof(yyyymmdd) === 'string') {
+      const utcdt = DateOps.crtUTCFromUTCYYYYMMDD(yyyymmdd);
+      return new Date(utcdt.getFullYear(), utcdt.getMonth(), utcddt.getDate());
+    } else if (typeof(yyyymmdd) === 'number') {
+      return DateOps.crtLocalFromUTCYYYYMMDD(yyyymmdd.toString());
+    } else {
+      throw new Error("Un-supported type for YYYYMMDD conversion");
+    }
+  }
+
+  static crtUTCFromLocalYYYYMMDD(yyyymmdd) {
     if (DateOps.localcache.get(yyyymmdd)) {
       return DateOps.localcache.get(yyyymmdd);
     }
 
     if (typeof(yyyymmdd) === 'string') {
       const yyyy = parseInt(yyyymmdd.substring(0, 4));
-      const mm = parseInt(yyyymmdd.substring(4, 2));
-      const dd = parseInt(yyyymmdd.substring(6, 2));
-      const dt = new Date(yyyy, mm - 1, dd);  // Month is 0 indexed for JS Date();
-      DateOps.localcache.set(yyyymmdd, dt);
-      return dt;
+      const mm = parseInt(yyyymmdd.substring(4, 6));
+      const dd = parseInt(yyyymmdd.substring(6, 8));
+      const localdt = new Date(yyyy, mm - 1, dd);  // Month is 0 indexed for JS Date();
+      const utcdt = new Date(Date.UTC(localdt.getUTCFullYear(), localdt.getUTCMonth(), localdt.getUTCDate()));
+      DateOps.localcache.set(yyyymmdd, utcdt);  // Add string -> dt
+      return utcdt;
     } else if (typeof(yyyymmdd) === 'number') {
-      const dt = DateOps.crtFromLocalYYYYMMDD(yyyymmdd.toString());
-      DateOps.localcache.set(yyyymmdd, dt);
+      const dt = DateOps.crtUTCFromLocalYYYYMMDD(yyyymmdd.toString());
+      DateOps.localcache.set(yyyymmdd, dt);  // Add number -> dt
       return dt;
     } else {
       throw new Error("Un-supported type for YYYYMMDD conversion");
     }
   }
 
-  static crtFromUTCTimestamp(timestamp) {
+  static crtUTCFromUTCTimestamp(timestamp) {
     // timestamp is always Unix Epoch UTC
     // Not checking for leading zeros, as its probably unnecessary
     // Number of digits indicate whether timestamp is in MSecs or Secs (valid till year 5138)
@@ -2180,29 +2508,29 @@ class DateOps {
     }
 
     if (typeof(timestamp) === 'string') {
-      if (timestamp.length < 12) {
-        return DateOps.crtFromUTCTimestampSecs(parseInt(timestamp));
+      if (timestamp.length < 12) {  // Assuming no timstamps of size 8 (clashes yyyymmdd)
+        return DateOps.crtUTCFromUTCTimestampSecs(parseInt(timestamp));
       } else {
-        return DateOps.crtFromUTCTimestampMSecs(parseInt(timestamp));
+        return DateOps.crtUTCFromUTCTimestampMSecs(parseInt(timestamp));
       }
     } else if (typeof(timestamp) === 'number') {
       const len = timestamp.toString().length;
       if (len < 12) {
-        return DateOps.crtFromUTCTimestampSecs(timestamp);
+        return DateOps.crtUTCFromUTCTimestampSecs(timestamp);
       } else {
-        return DateOps.crtFromUTCTimestampMSecs(timestamp);
+        return DateOps.crtUTCFromUTCTimestampMSecs(timestamp);
       }
     } else {
       throw new Error("Un-supported type for timestamp in Date conversion")
     }
   }
 
-  static crtFromUTCTimestampSecs(timestamp) {
+  static crtUTCFromUTCTimestampSecs(timestamp) {
     // timestamp is always Unix Epoch UTC
-    return DateOps.crtFromUTCTimestampMSecs(timestamp * 1000);
+    return DateOps.crtUTCFromUTCTimestampMSecs(timestamp * 1000);
   }
 
-  static crtFromUTCTimestampMSecs(timestamp) {
+  static crtUTCFromUTCTimestampMSecs(timestamp) {
     // timestamp is always Unix Epoch UTC
     const dt = new Date(timestamp);
     return dt
@@ -2215,7 +2543,7 @@ class DateOps {
       return DateOps.utccache.get(tm);
     }
 
-    YYYYMMDD = dt.getUTCFullYear().toString() + 
+    let YYYYMMDD = dt.getUTCFullYear().toString() + 
                ((dt.getUTCMonth() < 9) ? '0' + (dt.getUTCMonth() + 1) : (dt.getUTCMonth() + 1).toString()) + 
                ((dt.getUTCDate() < 10) ? '0' + dt.getUTCDate() : dt.getUTCDate().toString());
 
@@ -2230,7 +2558,7 @@ class DateOps {
       return DateOps.localcache.get(tm);
     }
 
-    YYYYMMDD = dt.getFullYear().toString() + 
+    let YYYYMMDD = dt.getFullYear().toString() + 
                ((dt.getMonth() < 9) ? '0' + (dt.getMonth() + 1) : (dt.getMonth() + 1).toString()) + 
                ((dt.getDate() < 10) ? '0' + dt.getDate() : dt.getDate().toString());
 
@@ -2239,34 +2567,77 @@ class DateOps {
   }
 
   static toUTCPIDisplayFromUTCYYYYMMDD(yyyymmdd) {
-    const dt = DateOps.crtFromUTCYYYYMMDD(yyyymmdd);
-    return DateOps.months[dt.getUTCMonth()] + " " + dt.getUTCDate() + " " + dt.getUTCFullYear();
+    // 10-Jan-2021
+    const dt = DateOps.crtUTCFromUTCYYYYMMDD(yyyymmdd);
+    return ((dt.getUTCDate() < 10) ? '0' + dt.getUTCDate() : dt.getUTCDate().toString()) + "-" + DateOps.months[dt.getUTCMonth()] + "-" + dt.getUTCFullYear();
   }
 
   static toLocalPIDisplayFromUTCYYYYMMDD(yyyymmdd) {
-    const dt = DateOps.crtFromUTCYYYYMMDD(yyyymmdd);
-    return DateOps.months[dt.getMonth()] + " " + dt.getDate() + " " + dt.getFullYear();
+    const dt = DateOps.crtUTCFromUTCYYYYMMDD(yyyymmdd);
+    return ((dt.getDate() < 10) ? '0' + dt.getDate() : dt.getDate().toString()) + "-" + DateOps.months[dt.getMonth()] + "-" + dt.getFullYear();
   }
 
   static toUTCPIDisplayFromLocalYYYYMMDD(yyyymmdd) {
-    const dt = DateOps.crtFromLocalYYYYMMDD(yyyymmdd);
-    return DateOps.months[dt.getUTCMonth()] + " " + dt.getUTCDate() + " " + dt.getUTCFullYear();
+    const dt = DateOps.crtUTCFromLocalYYYYMMDD(yyyymmdd);
+    return ((dt.getUTCDate() < 10) ? '0' + dt.getUTCDate() : dt.getUTCDate().toString()) + "-" + DateOps.months[dt.getUTCMonth()] + "-" + dt.getUTCFullYear();
   }
 
   static toLocalPIDisplayFromLocalYYYYMMDD(yyyymmdd) {
-    const dt = DateOps.crtFromLocalYYYYMMDD(yyyymmdd);
-    return DateOps.months[dt.getMonth()] + " " + dt.getDate() + " " + dt.getFullYear();
+    const dt = DateOps.crtUTCFromLocalYYYYMMDD(yyyymmdd);
+    return ((dt.getDate() < 10) ? '0' + dt.getDate() : dt.getDate().toString()) + "-" + DateOps.months[dt.getMonth()] + "-" + dt.getFullYear();
   }
 
-  static isSameDay(a, b) {
+  static isSameDate(a, b) {
     // Compare the day portion only. 
     // It should not matter whether we use UTC or Local as long as we use the same method
     //   on both the date objects (Internally both objects are based on UTC timestamps).
     return a.getUTCFullYear() === b.getUTCFullYear() &&
       a.getUTCMonth() === b.getUTCMonth() &&
-      a.getUTCDate()=== b.getUTCDate()
+      a.getUTCDate()=== b.getUTCDate();
+  }
+
+  static isSameDateTime(a, b) {
+    if (DateOps.isSameDate(a, b)) {
+      return a.getUTCHours() === b.getUTCHours() &&
+        a.getUTCMinutes() === b.getUTCMinutes() &&
+        a.getUTCSeconds()=== b.getUTCSeconds() &&
+        a.getUTCMilliseconds()=== b.getUTCMilliseconds();
+    }
+  }
+
+  static elapsedSecondsSinceUTCDayStart(dt) {
+    return dt.getUTCHours() * 3600 + dt.getUTCMinutes() * 60 + dt.getUTCSeconds();
+  }
+
+  static crtUTCDateRollbackToUTCDayStart(dt) {
+    return new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()));
+  }
+
+  static crtUTCDateWithDeltaDays(dt, deltaDays) {
+    const newDate = new Date(dt.getTime());
+    return DateOps.addDeltaUTCDays(newDate, deltaDays);
+  }
+
+  static addDeltaUTCDays(dt, deltaDays) {
+    dt.setUTCDate(dt.getUTCDate() + deltaDays);
+    return dt;
+  }
+
+  static crtUTCDateWithDeltaSecs(dt, deltaSecs) {
+    // UTC or local does not matter as delta moves the time ahead or back by the same amt
+    const newDate = new Date(dt.getTime());
+    return DateOps.addUTCDeltaSecs(newDate, deltaSecs);
+  }
+
+  static addUTCDeltaSecs(dt, deltaSecs) {
+    dt.setUTCSeconds(dt.getUTCSeconds() + deltaSecs);
+    return dt;
   }
 }
+DateOps.utccache = new Map();    // UTC yyyymmdd -> Date, tm -> UTC yyyymmdd
+DateOps.localcache = new Map();  // Lcl yyyymmdd -> Date, tm -> Lcl yyyymmdd
+DateOps.months = [ 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug',
+                   'Sep', 'Oct', 'Nov', 'Dec' ];
 
 class TradingInstrument {
   constructor(sym=null, strForm=null) {
@@ -3428,9 +3799,33 @@ class ListsDB {
     return doc["data"];
   }
 
-  async fetchTradindDays(sym) {
+  async fetchTradingDays(sym) {
     let doc = await this.get(sym.a + sym.b + "_twd");
     return doc["data"];
+  }
+
+  async fetchTradingHours(sym) {
+    let doc = await this.get(sym.a + sym.b + "_twh");
+    return doc["data"];
+  }
+
+  async fetchSpecialHours(sym, spclDay) {
+    let doc = await this.get(sym.a + "_spcl_" + spclDay + "_twh");
+    return doc["data"];
+  }
+
+  async fetchSpcialDaysNHours(sym) {
+    const days = await this.fetchSpecialDays(sym);
+    if (days) {
+      const dnh = new Map();
+      for (let i = 0; i < days.length; i++) {
+        dnh.set(days[i], await this.fetchSpecialHours(sym, days[i]));
+      }
+
+      return dnh;
+    }
+
+    return null;
   }
 
   async saveSyms(syms) {
@@ -3461,8 +3856,10 @@ class ListsDB {
 
   async saveCalendar(sym, entity) {
     await this.saveHolidays(sym, entity.getHolidays(sym.a, sym.b, sym.c));
-    await this.saveSpecialDays(sym, entity.getSpecialDays(sym.a, sym.b, sym.c));
+    //await this.saveSpecialDays(sym, entity.getSpecialDays(sym.a, sym.b, sym.c));
     await this.saveTradingDays(sym, entity.getTradingDays(sym.a, sym.b, sym.c));
+    await this.saveTradingHours(sym, entity.getTradingHours(sym.a, sym.b, sym.c));
+    await this.saveSpecialDaysNHours(sym, entity.getSpecialDaysNHours(sym.a, sym.b, sym.c));
   }
 
   async saveHolidays(sym, hols) {
@@ -3475,6 +3872,20 @@ class ListsDB {
 
   async saveTradingDays(sym, days) {
     await this.save(sym.a + sym.b + "_twd", days, true);
+  }
+
+  async saveTradingHours(sym, hours) {
+    await this.save(sym.a + sym.b + "_twh", hours, true);
+  }
+
+  async saveSpecialDaysNHours(sym, dnh) {
+    const days = [];
+    for (let [spcl, hrs] of dnh) {
+      days.push(spcl);
+      await this.save(sym.a + "_spcl_" + spcl + "_twh", hrs, true);
+    }
+
+    await this.saveSpecialDays(sym, days);
   }
 
   async remDB(name) {
@@ -3954,27 +4365,50 @@ class DBFacade {
   }
 
   static async fetchCalendar(sym) {
-    let cal = new TradingCalendar();
-    let hols = null;
-    let spcl = null;
-    let wrkg = null;
-    try {
-      hols = await DBFacade.listsDB.fetchHolidays(sym);
-      spcl = await DBFacade.listsDB.fetchSpecialDays(sym);
-      wrkg = await DBFacade.listsDB.fetchTradingDays(sym);
-    } catch (err) {
-      let response = await Fetcher.getCalendar(sym.a, sym.b, sym.c);
-      DBFacade.listsDB.saveCalendar(sym, response.entity());
-      hols = response.entity().getHolidays(sym.a, sym.b, sym.c);
-      spcl = response.entity().getSpecialDays(sym.a, sym.b, sym.c);
-      wrkg = response.entity().getTradingDays(sym.a, sym.b, sym.c);
+    if (!globals.calendar) {
+      globals.calendar = new TradingCalendar();
     }
 
-    cal.addHolidays(sym, hols);
-    cal.addSpecialDays(sym, spcl);
-    cal.addWorkingDays(sym, wrkg);
+    if (globals.calendar.hasCalendar(sym)) {
+      return globals.calendar;
+    }
+    
+    let hols = null;
+    //let spcl = null;
+    let wrkg = null;
+    let wrkh = null;
+    let sphr = null;
+    try {
+      hols = await DBFacade.listsDB.fetchHolidays(sym);
+      //spcl = await DBFacade.listsDB.fetchSpecialDays(sym);
+      wrkg = await DBFacade.listsDB.fetchTradingDays(sym);
+      wrkh = await DBFacade.listsDB.fetchTradingHours(sym);
+      sphr = await DBFacade.listsDB.fetchSpcialDaysNHours(sym);
 
-    return cal;
+      if (!(hols && wrkg && wrkh && sphr)) {
+        throw new Error("Some Calendar data not available");
+      }
+    } catch (err) {
+      console.log(err);
+
+      let response = await Fetcher.getCalendar(sym.a, sym.b, sym.c);
+      DBFacade.listsDB.saveCalendar(sym, response.entity());
+      const entity = response.entity();
+      
+      hols = entity.getHolidays(sym.a, sym.b, sym.c);
+      //spcl = entity.getSpecialDays(sym.a, sym.b, sym.c);
+      wrkg = entity.getTradingDays(sym.a, sym.b, sym.c);
+      wrkh = entity.getTradingHours(sym.a, sym.b, sym.c);
+      sphr = entity.getSpecialDaysNHours(sym.a, sym.b, sym.c);
+    }
+
+    globals.calendar.addHolidays(sym, hols);
+    //globals.calendar.addSpecialDays(sym, spcl);
+    globals.calendar.addWorkingDays(sym, wrkg);
+    globals.calendar.addWorkingHours(sym, wrkh);
+    globals.calendar.addSpecialDNH(sym, sphr);
+
+    return globals.calendar;
   }
 
   static async fetchUserData(data) {
