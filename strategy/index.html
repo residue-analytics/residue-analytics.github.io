@@ -143,33 +143,31 @@
         <div class="col-md-9">
           <div class="container p-3 pb-0 border rounded">
 
-            <div title="Simulation Control" class="row">
-              <div class="col-md mb-3 d-flex justify-content-center align-items-center">
-                  <button title="Start Simulation" type="button" id="livecontrol" class="btn btn-outline-secondary bi-stopwatch" onclick="liveMonitor(this)">
-                    <span class="badge bg-secondary">00</span>
-                  </button>
+            <div title="Simulation Control" class="row justify-content-center align-items-center">
+              <div class="col-md mb-3 d-flex justify-content-center">
+                <button title="Start Simulation" type="button" id="livecontrol" class="btn btn-outline-secondary bi-stopwatch" onclick="liveMonitor(this)">
+                  <span class="badge bg-secondary">00</span>
+                </button>
               </div>
 
               <div class="col-md mb-3">
-                <div title="Set Simulation Start Date" class="form-floating">
+                <!-- <div title="Set Simulation Start Date" class="form-floating visually-hidden">
                   <select class="form-select" id="days"></select>
                   <label class="form-label" for="days">Date</label>
-                </div>
-                <div title="Set Simulation Start Date" class="form-floating">
-                  <input id="simdate-picker" type="text" class="form-control">
-                  <label for="simdate-picker">Date</label>
+                </div> -->
+                <div title="Set Simulation Start Date" id="simdate-picker" class="form-floating" is="date-picker">
+                  <input id="picker" type="text" class="form-control">
+                  <label for="picker" class="form-label">Date</label>
                 </div>
               </div>
 
               <div class="col-md-6 mb-3">
                 <div title="Set Simulation Start Time" class="mb-3">
-                  <input type="text" id="timeslider" name="timeslider" value="" />
+                  <input type="text" id="simtimeslider" name="simtimeslider" value="" />
                 </div>
               </div>
 
-              <div title="Show/Hide Selector" class="col-1 mb-3 text-end d-flex align-items-center justify-content-center">
-                <!-- <div id="selectorTooltip" data-bs-toggle="tooltip" data-bs-placement="left" 
-                     data-bs-trigger="hover" title="Show/Hide Selector"> -->
+              <div title="Show/Hide Selector" class="col-1 mb-3 text-end">
                 <div>
                   <a id="collapseIcon" href="#selectorContainer" class="bi-arrows-collapse text-primary" role="button" 
                      data-bs-toggle="collapse" aria-label="Collapse Selector" aria-expanded="true" 
@@ -228,7 +226,21 @@
                     <label class="form-label" for="ce_pe">Option Type</label>
                   </div>
                 </div>
+              </div>
 
+              <div class="row row-cols-sm-2 align-items-center justify-content-center">
+                <div class="col-md-3 mb-3">
+                  <div title="Trade Date" id="seldate-picker" class="form-floating" is="date-picker">
+                    <input id="picker" type="text" class="form-control">
+                    <label for="picker" class="form-label">Date</label>
+                  </div>
+                </div>
+
+                <div class="col-md-9 mb-3">
+                  <div title="Trade Time" class="mb-3">
+                    <input type="text" id="seltimeslider" name="seltimeslider" value="" />
+                  </div>
+                </div>
               </div>
 
               <div class="row row-cols-sm-2 row-cols-md-4 pe-0 align-items-center justify-content-center">
@@ -355,13 +367,11 @@
     function setLayout() {
       UIUtils.addSpinner("buy"); UIUtils.addSpinner("sell");
 
-      //$("#simdate-picker").datepicker();
-
       autocomp = document.getElementById("autocompleteOptions");
       watchlist = document.getElementById("watchlist");
 
       selector = new ResDataSelector("exchange", "instrument", "underlying",
-        "expiries", "strikes", "ce_pe", "days", "dateslider", "timeslider", "erroralert", 
+        "expiries", "strikes", "ce_pe", "seldate-picker", "dateslider", "seltimeslider", "erroralert", 
         getRecords, disablePageInteractions, enablePageInteractions, sliderUpdateCallback);
       
       selector.cacheAllSelectors().then(data => {
@@ -534,7 +544,6 @@
         }
       } else {
         // Error
-        console.log(typeof(response));
         $("#LTP").val("NA");
         $("#OI").val("NA");
         
@@ -560,7 +569,10 @@
 
       stgHandler.updateAll(timestamp)
               .then(() => {console.log("In Slider Callback : Success updating strategies");})
-              .catch(() => {console.log("In Slider Callback : Error updating strategies");});
+              .catch((error) => {
+                console.log("In Slider Callback : Error updating strategies");
+                console.log(error);
+              });
     }
 
     function liveMonitor(node) {

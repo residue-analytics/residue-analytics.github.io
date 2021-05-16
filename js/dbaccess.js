@@ -562,6 +562,10 @@ class StrategyList {
     return this._stgs.values();
   }
 
+  sortedValuesOnSeq() {
+    return [...this._stgs.values()].sort( (a, b) => a.listSeq - b.listSeq );
+  }
+
   has(stg) {
     let id = stg;
     if (stg instanceof Strategy) {
@@ -582,6 +586,16 @@ class StrategyList {
       //  strategy.setParentNodeIDs(this._fullViewID, this._miniViewID);
       //}
       this._stgs.set(strategy.id, strategy);
+    }
+  }
+
+  update(strategy) {
+    if (strategy) {
+      if (!this.get(strategy.id)) {
+        console.log("Updating a non-existent strategy in StrategyList!!");
+      }
+
+      this.add(strategy);
     }
   }
 
@@ -632,6 +646,7 @@ class Strategy {
     this._lastUpdTime = null;
     this._legs = [];
     this.saved = false;
+    this.listSeq = 0;
   }
   
   _assign(other) {
@@ -642,6 +657,7 @@ class Strategy {
     this._lastUpdTime = other._lastUpdTime;
     this._legs = other._legs;
     this.saved = other.saved;
+    this.listSeq = other.listSeq;
 
     // Nullify other (only legs and history is enough as other attributes are immutable)
     other._legs = null;
@@ -657,6 +673,7 @@ class Strategy {
       newobj._legs.push(this._legs[i].clone(history));
     }
     newobj.saved = this.saved;
+    newobj.listSeq = this.listSeq;
 
     return newobj;
   }
@@ -677,8 +694,9 @@ class Strategy {
   toObject() {
     let obj = {
       id : this._id, n : this._name, ct : this._crtTime,
-      l : this._lastUpdTime, ls : []
-    }
+      l : this._lastUpdTime, sq: this.listSeq, ls : []
+    };
+
     for (let i = 0; i < this._legs.length; i++) {
       obj.ls.push(this._legs[i].toObject());
     }
@@ -691,6 +709,9 @@ class Strategy {
     this._name = obj.n;
     this._crtTime = obj.ct;
     this._lastUpdTime = obj.l;
+    this.listSeq = obj.sq;
+    this.saved = true;  // Loading from DB, so it is saved
+
     this._legs = [];
     for (let i = 0; i < obj.ls.length; i++) {
       this._legs.push(StrategyLeg.fromObject(obj.ls[i]));
@@ -910,7 +931,11 @@ class StrategyLeg {
     this._lastUpdTm = this._crtTime;
 
     // Changes made to this leg, tm (when change was made) -> [old leg clone, new leg clone]
-    this._history = new Map();  
+    this._history = new Map();
+    this.expiryMoment = null;
+    if (exp) {
+      this.expiryMoment = DateOps.toLocalExpiryMomentFromUTCExpiryYYYYMMDD(exp);
+    }
   }
 
   clone(history=false) {
@@ -994,6 +1019,15 @@ class StrategyLeg {
     return newobj;
   }
 
+  hasExpired(tm) {
+    // Has this leg expired as of the provided timestamp (msec)
+    if (this.expiryMoment < tm) {
+      return true;
+    }
+
+    return false;
+  }
+
   matches(other) {
     // Returns true if "this" matches "other" based on option/future contract attributes (not bs/qty/prc)
     if (this.a === other.a && this.b === other.b && this.c === other.c &&
@@ -1067,6 +1101,11 @@ class StrategyLeg {
       // This leg is created after the requested price update, so this price update should not
       //   have any effect on the P&L of this leg. We skip this update.
       console.log("Skipping this update price request");
+      return this;
+    }
+
+    if (this.hasExpired(tmstmp)) {
+      console.log("Skipping this update as leg has expired");
       return this;
     }
 
@@ -1160,6 +1199,7 @@ class StrategyLeg {
     
     return result;
   }
+
   // Straight forward data
 
   get id() {
@@ -1505,6 +1545,10 @@ class TradingSession {
 
   clone() {
     return new TradingSession(this.start, this.end);
+  }
+
+  get mid() {
+    return new Date( (this.start.getTime() + this.end.getTime())/2 );
   }
 
   isWithin(dt) {
@@ -2469,7 +2513,7 @@ class DateOps {
   static crtLocalFromUTCYYYYMMDD(yyyymmdd) {
     if (typeof(yyyymmdd) === 'string') {
       const utcdt = DateOps.crtUTCFromUTCYYYYMMDD(yyyymmdd);
-      return new Date(utcdt.getFullYear(), utcdt.getMonth(), utcddt.getDate());
+      return new Date(utcdt.getFullYear(), utcdt.getMonth(), utcdt.getDate());
     } else if (typeof(yyyymmdd) === 'number') {
       return DateOps.crtLocalFromUTCYYYYMMDD(yyyymmdd.toString());
     } else {
@@ -2587,6 +2631,15 @@ class DateOps {
     return ((dt.getDate() < 10) ? '0' + dt.getDate() : dt.getDate().toString()) + "-" + DateOps.months[dt.getMonth()] + "-" + dt.getFullYear();
   }
 
+  static toLocalFullPIDisplayFromTimestampMSecs(timestamp) {
+    var dt = new Date(timestamp);
+    
+    const str = ((dt.getDate() < 10) ? '0' + dt.getDate() : dt.getDate().toString()) + "-" + DateOps.months[dt.getMonth()] + "-" + dt.getFullYear() + " " + dt.getHours() + ":" +
+    ((dt.getMinutes() < 10) ? '0' + dt.getMinutes() : dt.getMinutes().toString());
+
+    return str;
+  }
+
   static isSameDate(a, b) {
     // Compare the day portion only. 
     // It should not matter whether we use UTC or Local as long as we use the same method
@@ -2632,6 +2685,14 @@ class DateOps {
   static addUTCDeltaSecs(dt, deltaSecs) {
     dt.setUTCSeconds(dt.getUTCSeconds() + deltaSecs);
     return dt;
+  }
+
+  static toLocalExpiryMomentFromUTCExpiryYYYYMMDD(yyyymmdd) {
+    // Returns Timestamp MSecs after which the contract really expires
+    //   End of the Expiry day (23:59:59.999)
+    const localDt = DateOps.crtLocalFromUTCYYYYMMDD(yyyymmdd);
+    localDt.setDate(localDt.getDate() + 1);
+    return localDt.getTime() - 1;  // -1 msec to stay in the same day, eod
   }
 }
 DateOps.utccache = new Map();    // UTC yyyymmdd -> Date, tm -> UTC yyyymmdd
@@ -4289,7 +4350,6 @@ class DBFacade {
       let data = null;
       try {
         data = await DBFacade.listsDB.fetchSyms();
-        console.log(data);
       } catch (err) {
         let response = await Fetcher.getXTM();
         data = response.data();
