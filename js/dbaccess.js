@@ -15,10 +15,10 @@ class UIUtils {
 
     //parent.options.length = 0;
     symList.getAutocompleteList().then( autoList => {
-      console.log(autoList);
+      //console.log(autoList);
       for (const optVal of autoList) {
         let optNode = document.createElement("option");
-        optNode.value = optVal;
+        optNode.value = optVal.strForm;
         parent.appendChild(optNode);
       }
     });
@@ -818,13 +818,21 @@ class Strategy {
       if (failure) {
         reject(reasons);
       } else {
+        let reasons = [];
         for (let i = 0; i < results.length; i++) {
           if (results[i].status === "fulfilled") {
-            curPosition += results[i].value.curPosition;
+            try {
+              curPosition += results[i].value.curPosition;
+            } catch (ex) {
+              reasons.push(ex);
+            }
           }
         }
-
-        resolve(curPosition);
+        if (reasons.length > 0) {
+          reject(reasons);
+        } else {
+          resolve(curPosition);
+        }
       }
     });
   }
@@ -871,6 +879,12 @@ class Strategy {
     return this._legs.length;
   }
 
+  get tradeCount() {
+    return this.legs.reduce(function(total, leg) {
+      return total + leg.tradeCount;
+    }, 0);
+  }
+
   get legs() {
     return this._legs;
   }
@@ -902,18 +916,14 @@ LOT_SIZE = {
 };
 
 class StrategyLeg {
-  constructor(sym = null, exp, isBuy, qty, prc, stk = null, cepe = null, crtTm=null) {
+  constructor(sym, exp, isBuy, qty, prc, stk = null, cepe = null, crtTm=null) {
 
-    if (sym !== null) {
-      if (sym.isIndex) {
-        throw new Error("Invalid type of instrument for strategy");
-      }
-
-      this._a = sym.a;
-      this._b = sym.b;
-      this._c = sym.c;
-      this._isOpt = sym.isOption;
+    if (sym.isIndex) {
+      throw new Error("Invalid type of instrument for strategy");
     }
+
+    this.sym = sym;
+    this._isOpt = sym.isOption;
 
     this._id = "L" + Date.now().toString();
     this._crtTime = (crtTm) ? crtTm : Date.now();  // Traded On
@@ -932,27 +942,31 @@ class StrategyLeg {
 
     // Changes made to this leg, tm (when change was made) -> [old leg clone, new leg clone]
     this._history = new Map();
+    this.forceValueZero = false;  // Enforce value of this leg to be zero
     this.expiryMoment = null;
+
     if (exp) {
-      this.expiryMoment = DateOps.toLocalExpiryMomentFromUTCExpiryYYYYMMDD(exp);
+      this.expirySession = globals.calendar.prevTradingSessionOn(
+        this.sym,
+        new Date(DateOps.toLocalExpiryMomentFromUTCExpiryYYYYMMDD(exp))
+      );
+      this.expiryMoment = this.expirySession.end.getTime();
     }
   }
 
   clone(history=false) {
     // All attributes are expected to be same in clone
-    let newobj = new StrategyLeg(null, this._e, this._buy, this._q, this._prc,
+    let newobj = new StrategyLeg(this.sym, this._e, this._buy, this._q, this._prc,
       this._s, this._cp);
     newobj._id = this._id;
     newobj._crtTime = this._crtTime;
-    newobj._a = this._a;
-    newobj._b = this._b;
-    newobj._c = this._c;
     newobj._isOpt = this._isOpt;
     newobj._curPrc = this._curPrc;
     newobj._extq = this._extq;
     newobj._extPrc = this._extPrc;
     newobj._stlVal = this._stlVal;
     newobj._lastUpdTm = this._lastUpdTm;
+    newobj.forceValueZero = this.forceValueZero;
 
     // We do not clone hisotry, as cloned records are added to history (which will create circular reference)
     if (history) {
@@ -982,22 +996,20 @@ class StrategyLeg {
 
     // Not taking key (can be recreated based on abc)
     return {
-      a : this._a, b : this._b, c : this._c,
+      a : this.a, b : this.b, c : this.c,
       cp : this._cp, ct : this._crtTime, e : this._e, h : hist,
       id : this._id, io : this._isOpt, l : this._lastUpdTm,
       p : this._prc, q : this._q, r : this._curPrc,
       s : this._s, t : this._stlVal, x : this._extPrc, xq : this._extq,
-      y : this._buy
+      y : this._buy, z : this.forceValueZero
     };
   }
 
   static fromObject(obj) {
-    let newobj = new StrategyLeg(null, obj.e, obj.y, obj.q, obj.p,
+    const sym = globals.symbols.getLeaf(obj.a, obj.b, obj.c);
+    let newobj = new StrategyLeg(sym, obj.e, obj.y, obj.q, obj.p,
       obj.s, obj.cp, obj.ct);
     newobj._id = obj.id;
-    newobj._a = obj.a;
-    newobj._b = obj.b;
-    newobj._c = obj.c;
     newobj._isOpt = obj.io;
 
     if (obj.h) {
@@ -1015,13 +1027,15 @@ class StrategyLeg {
     }
     newobj._stlVal = parseFloat(obj.t);
     newobj._lastUpdTm = obj.l;
+    newobj.forceValueZero = obj.z;
 
     return newobj;
   }
 
   hasExpired(tm) {
     // Has this leg expired as of the provided timestamp (msec)
-    if (this.expiryMoment < tm) {
+    if (this.expiryMoment <= tm) {
+      // console.log("Leg expired on [" + this.expiryMoment + "] cur tm [" + tm + "]");
       return true;
     }
 
@@ -1100,17 +1114,21 @@ class StrategyLeg {
     if (this.createTime > tmstmp) {
       // This leg is created after the requested price update, so this price update should not
       //   have any effect on the P&L of this leg. We skip this update.
-      console.log("Skipping this update price request");
+      console.log("Skipping this update price request as leg created in futur");
+      
+      this._lastUpdTm = tmstmp;
+
       return this;
     }
 
     if (this.hasExpired(tmstmp)) {
-      console.log("Skipping this update as leg has expired");
-      return this;
+      console.log("Leg has expired, its value is same as was on expiry");
+
+      tmstmp = this.expiryMoment;
     }
 
     let resList = await this.getRecord(tmstmp);
-    this.curPrice = resList.one.ltp;  // setter will call this.updatedNow() which is not right
+    this.curPrice = resList.one.ltp;
     this._lastUpdTm = tmstmp;
 
     return this;  // return self to aid the callbacks
@@ -1128,16 +1146,19 @@ class StrategyLeg {
   }
 
   get entryValue() {
+    // This is returned based on the last update time, use history
     return this.tqty * this.entryPrice;
   }
 
   get curValue() {
     // Current Value of this contract in the market (not considering settled value)
+    // This is returned based on the last update time, use history
+
     if (this.lots === 0) {  // As this leg has been exited
       return 0;
     }
 
-    if (!this.curPrice) {
+    if (!this.curPrice && this.curPrice !== 0) {  // curPrice == 0 is valid price
       throw new ResError(ResErrorCode.NO_DATA, "Current Price not available");
     }
 
@@ -1147,6 +1168,8 @@ class StrategyLeg {
   get curPosition() {
     // Position shows this legs P&L wrt already settled quantity, entryPrice, exitPrice & 
     //   curPrice (must be updated before calling)
+    // This is returned based on the last update time, use history
+
     if (this.lots === 0) {
       return this.settledValue;
     }
@@ -1185,18 +1208,23 @@ class StrategyLeg {
     // Returns an array of Trades in the sequence they were added/updated (traded)
     let result = [];
     if (this.histCount === 0) {
-      result.append(this.trade);
+      result.push(this.trade);
     } else {
       for (let [key, values] of this._history) {
         // JS Map object iterates in same sequence as added to
         if (result.length === 0) {
           // First record, we pick-up both the legs from value
-          result.append(values[0].trade);
+          result.push(values[0].trade);
         }
-        result.append(values[1].trade);
+        result.push(values[1].trade);
       }
     }
     
+    if (result.length > 1) {
+      //return result.sort( (a, b) => a.createTime() - b.createTime() );
+      return result.sort( (a, b) => a.tod - b.tod );
+    }
+
     return result;
   }
 
@@ -1224,7 +1252,8 @@ class StrategyLeg {
   }
 
   get instrument() {
-    let inst = new TradingInstrument(globals.symbols.getLeaf(this.a, this.b, this.c));
+    //let inst = new TradingInstrument(globals.symbols.getLeaf(this.a, this.b, this.c));
+    let inst = new TradingInstrument(this.sym);
     if (this.isFuture) {
       inst.exp = this.exp;
     }
@@ -1238,19 +1267,20 @@ class StrategyLeg {
   }
 
   get trade() {
+    // For a single trade, used in allTrades, firstTrade
     return new Trade(this.instrument, this.createTime, this.isBuy, this.tqty, this.entryPrice);
   }
 
   get a() {
-    return this._a;
+    return this.sym.a;
   }
 
   get b() {
-    return this._b;
+    return this.sym.b;
   }
 
   get c() {
-    return this._c;
+    return this.sym.c;
   }
 
   get exp() {
@@ -1320,11 +1350,15 @@ class StrategyLeg {
   }
 
   get tqty() {
-    return this._q * LOT_SIZE[this._c];
+    return this._q * LOT_SIZE[this.c];
   }
 
   get histCount() {
     return this._history.size;
+  }
+
+  get tradeCount() {
+    return this.histCount + 1;
   }
 
   get lastUpdateTime() {
@@ -1503,18 +1537,51 @@ class RecordPair {
   }
 }
 
-/* class UTCDate {
-  constructor(yyyy=null, mm=null, dd=null, h=null, m=null, s=null, ms=null) {
-    // Arguments are 
-    this.utc = null;
-    if (!yyyy) {
-      this.utc = new Date(Date.now());
+class AwareDate extends Date {
+  constructor(yyyy=null, mm=null, dd=null, h=null, m=null, s=null, ms=null, type='local') {
+    // Requires very careful usage, the arguments should not be jumbled
+    //console.log(arguments);
+    switch(arguments.length) {
+      case 0:
+        super();
+        break;
+      case 1:
+        super(yyyy);
+        break;
+      case 2:
+        super(yyyy, mm);
+        break;
+      case 3:
+        super(yyyy, mm, dd);
+        break;
+      case 4:
+        super(yyyy, mm, dd, h);
+        break;
+      case 5:
+        super(yyyy, mm, dd, h, m);
+        break;
+      case 6:
+        super(yyyy, mm, dd, h, m, s);
+        break;
+      default:
+        super(yyyy, mm, dd, h, m, s, ms);
+    }
+
+    if (type === 'local' || type === 'utc') {
+      this.type = type;  // local or utc
     } else {
-      let dt = new Date(yyyy, mm, dd, h, m, s, ms);
-      this.utc = new Date(dt.getTime());
+      throw new Error(`Invalid ResDate Type [${type}]`);
     }
   }
-} */
+
+  get isLocal() {
+    return this.type === 'local';
+  }
+
+  get isUTC() {
+    return this.type === 'utc';
+  }
+}
 
 class TradingSession {
   constructor(start, end) {
@@ -1595,15 +1662,14 @@ class TradingCalendar {
   constructor() {
     this.hols = new Map();  // a -> [Date obj]
     this.spcl = new Map();  // a -> [Date obj]
+    this.spch = new Map();  // a -> { yyyymmdd -> sorted [ TradingSession, TradingSession, ], yyyymmdd -> [obj, obj], }
+
     this.wrkg = new Map();  // a + b -> [int]
     this.wrkh = new Map();  // a + b -> [ { s: secs, e: secs }, {}, {}, ]
-
-    // a -> { yyyymmdd -> sorted [ TradingSession, TradingSession, ], yyyymmdd -> [obj, obj], }
-    this.spch = new Map();
   }
 
   hasCalendar(sym) {
-    if (this.wrkg.has(sym.a + sym.b)) {
+    if (this.wrkg.has(sym.a + ":" + sym.b)) {
       return true;
     }
     return false;
@@ -1653,7 +1719,7 @@ class TradingCalendar {
     // We need exc and inst both in this map, [1, 2, .., 7] : [mon, tue, .., sun]
     // Translate this to JS convention - [0, 1, .., 6] : [sun, mon, .., sat]
     const wdays = [];
-    console.log("Adding wotking days for " + sym.b + sym.c);
+    //console.log("Adding wotking days for " + sym.b + sym.c);
     for (let i = 0; i < days.length; i++) {
       if (days[i] == 7) {
         wdays.push(0);
@@ -1661,7 +1727,7 @@ class TradingCalendar {
         wdays.push(days[i]);
       }
     }
-    this.wrkg.set(sym.a + sym.b, wdays);
+    this.wrkg.set(sym.a + ":" + sym.b, wdays);
   }
 
   addWorkingHours(sym, hours) {
@@ -1672,7 +1738,7 @@ class TradingCalendar {
       const tmpList = [s, e];
       tmpList.forEach( (o, i, a) => {
         if (o.length <= 2) {
-          a[i] = parseInt(o) * 3600; // Only HHH given, Convert to seconds
+          a[i] = parseInt(o) * 3600; // Only HH given, Convert to seconds
         } else if (o.length <= 5) {
           // H:M given, H * 120 + S * 60
           a[i] = o.split(":").reduce((acc, cur) => {return parseInt(acc) * 3600 + parseInt(cur) * 60} );
@@ -1707,19 +1773,36 @@ class TradingCalendar {
       return 0;
     } );
 
-    this.wrkh.set(sym.a + sym.b, hrList);
+    this.wrkh.set(sym.a + ":" + sym.b, hrList);
   }
 
   isWorkingDay(sym, dt) {
     // Working Day is not reliable to take decisions, as this day could be -
-    //   a holiday even though its a working day or 
-    //   a special trading day even though its not a working day
-    const days = this.wrkg.get(sym.a + sym.b);
-    if (!days) {
-      return false;
+    //  - a holiday even though its a working day
+    //  - a special trading day even though its not a working day
+    let days = [];
+    if (typeof(sym) === 'string') {
+      // Must be 'a'
+      const a = sym + ":";
+      for (let [key, value] of this.wrkg) {
+        if (key.startsWith(a)) {
+          days = days.concat(value);
+        }
+      }
+    } else {
+      days = this.wrkg.get(sym.a + ":" + sym.b);
     }
 
-    return days.includes(dt.getUTCDay());
+    //console.log("DBG: Working Days " + days);
+    if (days && days.length > 0) {
+      if (dt.isLocal) {  // If not AwareDate, then it will be undefined
+        return days.includes(dt.getDay());
+      } else {
+        return days.includes(dt.getUTCDay());     
+      } 
+    }
+
+    return false;
   }
 
   isWorkingNow(sym, dt) {
@@ -1727,8 +1810,19 @@ class TradingCalendar {
 
     if (this.isWorkingDay(sym, dt)) {
       const elapsedSecs = DateOps.elapsedSecondsSinceUTCDayStart(dt);
-      const hrRanges = this.wrkh.get(sym.a + sym.b);
-      if (hrRanges) {
+      let hrRanges = [];
+      if (typeof(sym) === 'string') {
+        const a = sym + ":";
+        for (let [key, value] of this.wrkh) {
+          if (key.startsWith(a)) {
+            hrRanges = hrRanges.concat(value);
+          }
+        }
+      } else {
+        hrRanges = this.wrkh.get(sym.a + ":" + sym.b);
+      }
+
+      if (hrRanges && hrRanges.length > 0) {
         for (let i = 0; i < hrRanges.length; i++) {
           if (hrRanges.s <= elapsedSecs && hrRanges.e >= elapsedSecs) {
             return true;
@@ -1751,7 +1845,13 @@ class TradingCalendar {
     }
 
     // If it is a working day, then it could be a holiday
-    const holidays = this.hols.get(sym.a);
+    let holidays = null;
+    if (typeof(sym) === 'string') {
+      holidays = this.hols.get(sym);
+    } else {
+      holidays = this.hols.get(sym.a);
+    }
+
     if (holidays) {
       for (let i = 0; i < holidays.length; i++) {
         if (DateOps.isSameDate(dt, holidays[i])) {
@@ -1764,7 +1864,13 @@ class TradingCalendar {
   }
 
   isSpecialDay(sym, dt) {
-    const special = this.spcl.get(sym.a);
+    let special = null;
+    if (typeof(sym) === 'string') {
+      special = this.spcl.get(sym);
+    } else {
+      special = this.spcl.get(sym.a);
+    }
+
     if (special) {
       for (let i = 0; i < special.length; i++) {
         if (DateOps.isSameDate(dt, special[i])) {
@@ -1787,7 +1893,13 @@ class TradingCalendar {
   getSpecialTradingSessionOn(sym, dt) {
     // If dt is within a special trading session, then return the session
     // We do not need to use isSpecialDay()
-    const dnh = this.spch.get(sym.a);
+    let dnh = null;
+    if (typeof(sym) === 'string') {
+      dnh = this.spch.get(sym);
+    } else {
+      dnh = this.spch.get(sym.a);
+    }
+
     if (dnh) {
       const hours = dnh.get(DateOps.toUTCYYYYMMDDFromDate(dt));
       if (hours) {
@@ -1806,7 +1918,13 @@ class TradingCalendar {
   nextSpecialTradingSessionOn(sym, dt) {
     // If dt is on a special day then we return the next special trading session
     // If dt is not on a special day, we return null
-    const dnh = this.spch.get(sym.a);
+    let dnh = null;
+    if (typeof(dnh) === 'string') {
+      dnh = this.spch.get(sym)
+    } else {
+      dnh = this.spch.get(sym.a);
+    }
+
     if (dnh) {
       const hours = dnh.get(DateOps.toUTCYYYYMMDDFromDate(dt));  // sorted array
       if (hours) {
@@ -1814,6 +1932,33 @@ class TradingCalendar {
         for (let i = 0; i < hours.length; i++) {
           // TradingSessions (hours) are sorted in ascending order
           if (dt <= hours[i].start) {
+            return hours[i].clone();
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  prevSpecialTradingSessionOn(sym, dt) {
+    // If dt is on a special day then we return the previous special trading session
+    // If dt is not on a special day, we return null
+
+    let dnh = null;
+    if (typeof(dnh) === 'string') {
+      dnh = this.spch.get(sym)
+    } else {
+      dnh = this.spch.get(sym.a);
+    }
+
+    if (dnh) {
+      const hours = dnh.get(DateOps.toUTCYYYYMMDDFromDate(dt));  // sorted array
+      if (hours) {
+        // This is a special day
+        for (let i = hours.length - 1; i <= 0; i--) {
+          // TradingSessions (hours) are sorted in ascending order
+          if (hours[i].end <= dt) {
             return hours[i].clone();
           }
         }
@@ -1845,18 +1990,32 @@ class TradingCalendar {
   getTradingSessionOn(sym, dt) {
     // Get a trading session which overlaps the provided Date & Time
     // Some special days are on working days also (like rare exchange outages)
+
     if (this.isSpecialDay(sym, dt)) {
       return this.getSpecialTradingSessionOn(sym, dt);
     } else if (this.isWorkingDay(sym, dt)) {
-      const hrRanges = this.wrkh.get(sym.a + sym.b);
-      if (hrRanges) {
+      let hrRanges = [];
+      if (typeof(sym) === 'string') {
+        const a = sym + ":";
+        for (let [key, value] of this.wrkh) {
+          if (key.startsWith(a)) {
+            hrRanges = hrRanges.concat(value);
+          }
+        }
+      } else {
+        hrRanges = this.wrkh.get(sym.a + ":" + sym.b);
+      }
+
+      if (hrRanges && hrRanges.length > 0) {
         const elapsedSecs = DateOps.elapsedSecondsSinceUTCDayStart(dt);
         for (let i = 0; i < hrRanges.length; i++) {
           if (hrRanges[i].s <= elapsedSecs && hrRanges[i].e >= elapsedSecs) {
             const start = DateOps.crtUTCDateRollbackToUTCDayStart(dt); 
             start.setUTCSeconds(hrRanges[i].s);
+
             const end = DateOps.crtUTCDateRollbackToUTCDayStart(dt);
-             end.setUTCSeconds(hrRanges[i].e);
+            end.setUTCSeconds(hrRanges[i].e);
+
             return new TradingSession(start, end);
           }
         }
@@ -1869,19 +2028,76 @@ class TradingCalendar {
   nextTradingSessionOn(sym, dt) {
     // Get a trading session which comes after (non-overlapping) the dt, date-time
     // Some special days are on working days also (like rare exchange outages)
+
+    //console.log("next trading session on " + dt);
     if (this.isSpecialDay(sym, dt)) {
       return this.nextSpecialTradingSessionOn(sym, dt);
     } else if (this.isWorkingDay(sym, dt)) {
-      const hrRanges = this.wrkh.get(sym.a + sym.b);
-      if (hrRanges) {
+      let hrRanges = [];
+      if (typeof(sym) === 'string') {
+        const a = sym + ":";
+        for (let [key, value] of this.wrkh) {
+          if (key.startsWith(a)) {
+            hrRanges = hrRanges.concat(value);
+          }
+        }
+      } else {
+        hrRanges = this.wrkh.get(sym.a + ":" + sym.b);
+      }
+
+      if (hrRanges && hrRanges.length > 0) {
         const elapsedSecs = DateOps.elapsedSecondsSinceUTCDayStart(dt);
-        let foundCur = false;
+        //let foundCur = false;
         for (let i = 0; i < hrRanges.length; i++) {
           if (elapsedSecs < hrRanges[i].s ) {
             const start = DateOps.crtUTCDateRollbackToUTCDayStart(dt);
             start.setUTCSeconds(hrRanges[i].s);
+
             const end = DateOps.crtUTCDateRollbackToUTCDayStart(dt);
             end.setUTCSeconds(hrRanges[i].e);
+
+            //console.log(start + " " + end);
+            return new TradingSession(start, end);
+          } 
+        }
+      }
+    }
+
+    return null;
+  }
+
+  prevTradingSessionOn(sym, dt) {
+    // Get a trading session which comes before (non-overlapping) the dt, date-time
+    // Some special days are on working days also (like rare exchange outages)
+
+    //console.log("previous trading session on " + dt);
+    if (this.isSpecialDay(sym, dt)) {
+      return this.prevSpecialTradingSessionOn(sym, dt);
+    } else if (this.isWorkingDay(sym, dt)) {
+      let hrRanges = [];
+      if (typeof(sym) === 'string') {
+        const a = sym + ":";
+        for (let [key, value] of this.wrkh) {
+          if (key.startsWith(a)) {
+            hrRanges = hrRanges.concat(value);
+          }
+        }
+      } else {
+        hrRanges = this.wrkh.get(sym.a + ":" + sym.b);
+      }
+
+      if (hrRanges && hrRanges.length > 0) {
+        const elapsedSecs = DateOps.elapsedSecondsSinceUTCDayStart(dt);
+        //let foundCur = false;
+        for (let i = hrRanges.length - 1; i >= 0; i--) {
+          if (hrRanges[i].e <= elapsedSecs) {
+            const start = DateOps.crtUTCDateRollbackToUTCDayStart(dt);
+            start.setUTCSeconds(hrRanges[i].s);
+
+            const end = DateOps.crtUTCDateRollbackToUTCDayStart(dt);
+            end.setUTCSeconds(hrRanges[i].e);
+
+            //console.log(start + " " + end);
             return new TradingSession(start, end);
           } 
         }
@@ -1892,16 +2108,19 @@ class TradingCalendar {
   }
 
   nextTradingDate(sym, dt) {
+    //console.log("next trading date after " + dt);
     let next = DateOps.crtUTCDateWithDeltaDays(dt, 1);  // Move ahead by 1 day
     while (this.isHoliday(sym, next) && !this.isSpecialDay(sym, next)) {
       next = DateOps.addDeltaUTCDays(next, 1);  // No need to assign though, but for clarity
     }
 
     // Return start of the UTC day
+    //console.log("DBG: next trading date " + next);
     return DateOps.crtUTCDateRollbackToUTCDayStart(next);
   }
 
   nextTradingSession(sym, dt) {
+    //console.log("next trading session after " + dt);
     let next = this.nextTradingSessionOn(sym, dt);
     if (next) {
       return next;
@@ -2456,11 +2675,13 @@ class SymbolList {
     //return new Set(fullList.sort());
   }
 
-  async loadCalendar() {
+  async loadCalendar(calendar) {
     for (let leaves of this.cMap.values()) {
       for (let leaf of leaves) {
         // DBFacade updates the globals.calendar
-        await DBFacade.fetchCalendar(leaf);
+        if (!calendar.hasCalendar(leaf)) {
+          await DBFacade.fetchCalendar(leaf, calendar);
+        }
       }
     }
   }
@@ -2878,6 +3099,20 @@ class TradingInstrument {
     }
 
     return false;
+  }
+}
+
+class Trade {
+  constructor(instrument, tod, isBuy, qty, prc) {
+    this.inst   = instrument;
+    this.tod    = tod;
+    this.isBuy  = isBuy;
+    this.isSell = !this.isBuy;
+    this.qty    = qty;
+    this.prc    = prc;
+    this.day    = DateOps.toLocalYYYYMMDDFromDate(new Date(tod));
+
+    //console.log(`DBG: Trade Day [${this.day}] Time [${this.tod}]`);
   }
 }
 
@@ -4269,7 +4504,7 @@ class DBFacade {
   static async dbfetchNsave(db, dbreq) {
     // Returns a list of DBResults
     let totCount = dbreq.expectedCount;
-    console.log("Exp [" + totCount + "]");
+    //console.log("DBG: Exp [" + totCount + "]");
     if (totCount > 300) {
       throw new DBError("Too many records requested, please reduce the query size");
     }
@@ -4357,7 +4592,6 @@ class DBFacade {
       }
 
       DBFacade.symList = new SymbolList(data);
-      globals.symbols = DBFacade.symList;
       return DBFacade.symList;
     }
 
@@ -4424,15 +4658,15 @@ class DBFacade {
     return { stks: sym.getStrikes(d), days: sym.getDays(d) };
   }
 
-  static async fetchCalendar(sym) {
-    if (!globals.calendar) {
-      globals.calendar = new TradingCalendar();
+  static async fetchCalendar(sym, calendar=null) {
+    if (!calendar) {
+      calendar = new TradingCalendar();
     }
 
-    if (globals.calendar.hasCalendar(sym)) {
-      return globals.calendar;
+    if (calendar.hasCalendar(sym)) {
+      return calendar;
     }
-    
+
     let hols = null;
     //let spcl = null;
     let wrkg = null;
@@ -4462,13 +4696,13 @@ class DBFacade {
       sphr = entity.getSpecialDaysNHours(sym.a, sym.b, sym.c);
     }
 
-    globals.calendar.addHolidays(sym, hols);
-    //globals.calendar.addSpecialDays(sym, spcl);
-    globals.calendar.addWorkingDays(sym, wrkg);
-    globals.calendar.addWorkingHours(sym, wrkh);
-    globals.calendar.addSpecialDNH(sym, sphr);
+    calendar.addHolidays(sym, hols);
+    //calendar.addSpecialDays(sym, spcl);
+    calendar.addWorkingDays(sym, wrkg);
+    calendar.addWorkingHours(sym, wrkh);
+    calendar.addSpecialDNH(sym, sphr);
 
-    return globals.calendar;
+    return calendar;
   }
 
   static async fetchUserData(data) {

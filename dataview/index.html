@@ -25,6 +25,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ion-rangeslider/2.3.1/js/ion.rangeSlider.min.js"></script>
 
   <script src="//cdn.jsdelivr.net/npm/pouchdb@7.2.1/dist/pouchdb.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/pouchdb@7.2.1/dist/pouchdb.find.min.js"></script>
   <script src="/js/classes.js"></script>
   <script src="/js/dbaccess.js"></script>
   <script src="/js/uicomps.js"></script>
@@ -154,10 +155,15 @@
       </div>
 
       <hr />
+      <pre class="text-break" style="white-space:normal" id="output"></pre>
 
       <div id="chart"></div>
 
-      <pre class="text-break" style="white-space:normal" id="output"></pre>
+      <div title="Strategy Editor" id="editor" is="strategy-editor" class="row">
+      </div>
+
+      <div is="strategy-card-list" id="strategyCards" class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-5 mb-3">
+      </div>
 
       <!-- <button class="btn btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#collapseExample" aria-expanded="true" aria-controls="collapseExample">
         Button with data-bs-target
@@ -324,13 +330,13 @@
         </div>
       </div> -->
       
-      <button class="btn btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#CollapseTables" aria-expanded="true" aria-controls="CollapseTables">
-        Collapse Tables
-      </button>
+        <button class="btn btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#CollapseTables" aria-expanded="true" aria-controls="CollapseTables">
+          Collapse Tables
+        </button>
 
-      <div class="collapse show" id="CollapseTables">
-        <div id="datatables">
-      </div>
+        <div class="collapse show" id="CollapseTables">
+          <div id="datatables">
+        </div>
       </div>
     </div>
   </div>
@@ -338,6 +344,7 @@
   <script type="text/javascript">
     var cacheSyms = null;
     var strategy = null;
+    var stgHandler = null;
 
     $(document).ready(setLayout);
 
@@ -362,12 +369,28 @@
       UIUtils.addSpinner("exchange");
       UIUtils.addSpinner("instrument");
       UIUtils.addSpinner("underlying");
+
       DBFacade.fetchLists().then(symList => {
         cacheSyms = symList;
+        globals.symbols = symList;
+
+        if (!globals.calendar) {
+          globals.calendar = new TradingCalendar();
+          globals.symbols.loadCalendar(globals.calendar).then( () => {
+            DBFacade.fetchUserData(new StrategyList("editor", "strategyCards")).then(stgs => {
+              globals.strategies = stgs;
+              strategyCards.updateCards(globals.strategies);
+            });
+          });
+        }
+
         UIUtils.updSelectDropdown("exchange", symList.getAs());
         UIUtils.rmSpinner("exchange");
+
         let exc = document.getElementById("exchange").options[0].text;
         pageUpdateLists("exchange", exc);
+
+        stgHandler = new StrategyListEditorHandler(selector, "editor", "strategyCards", "erroralert");
       });
     }
 

@@ -29,6 +29,7 @@
 
   <script src="//cdn.jsdelivr.net/npm/pouchdb@7.2.1/dist/pouchdb.min.js"></script>
   <script src="//cdn.jsdelivr.net/npm/pouchdb@7.2.1/dist/pouchdb.find.min.js"></script>
+
   <script src="/js/classes.js"></script>
   <script src="/js/dbaccess.js"></script>
   <script src="/js/uicomps.js"></script>
@@ -145,7 +146,7 @@
 
             <div title="Simulation Control" class="row justify-content-center align-items-center">
               <div class="col-md mb-3 d-flex justify-content-center">
-                <button title="Start Simulation" type="button" id="livecontrol" class="btn btn-outline-secondary bi-stopwatch" onclick="liveMonitor(this)">
+                <button title="Start Simulation" type="button" id="livecontrol" class="btn btn-outline-secondary bi-stopwatch">
                   <span class="badge bg-secondary">00</span>
                 </button>
               </div>
@@ -163,7 +164,7 @@
 
               <div class="col-md-6 mb-3">
                 <div title="Set Simulation Start Time" class="mb-3">
-                  <input type="text" id="simtimeslider" name="simtimeslider" value="" />
+                  <input type="text" id="simtime-slider" name="simtimeslider" value="" />
                 </div>
               </div>
 
@@ -231,8 +232,8 @@
               <div class="row row-cols-sm-2 align-items-center justify-content-center">
                 <div class="col-md-3 mb-3">
                   <div title="Trade Date" id="seldate-picker" class="form-floating" is="date-picker">
-                    <input id="picker" type="text" class="form-control">
-                    <label for="picker" class="form-label">Date</label>
+                    <input id="selpicker" type="text" class="form-control">
+                    <label for="selpicker" class="form-label">Date</label>
                   </div>
                 </div>
 
@@ -357,6 +358,7 @@
 
   <script type="text/javascript">
 
+    var simControl = null;
     var selector = null;
     var watchlist = null;
     var stgHandler = null;
@@ -365,39 +367,58 @@
     $(document).ready(setLayout);
 
     function setLayout() {
-      UIUtils.addSpinner("buy"); UIUtils.addSpinner("sell");
+      disablePageInteractions();
 
       autocomp = document.getElementById("autocompleteOptions");
       watchlist = document.getElementById("watchlist");
 
-      selector = new ResDataSelector("exchange", "instrument", "underlying",
-        "expiries", "strikes", "ce_pe", "seldate-picker", "dateslider", "seltimeslider", "erroralert", 
-        getRecords, disablePageInteractions, enablePageInteractions, sliderUpdateCallback);
-      
-      selector.cacheAllSelectors().then(data => {
-        // Load in background, no visual indication
-        autocomp.loadList(data).then(() => { 
-          watchlist.init(autocomp);
-        });
-        
-        globals.symbols.loadCalendar();
+      DBFacade.fetchLists()
+        .then(symList => {
+          globals.symbols = symList;
 
-        DBFacade.fetchUserData(new StrategyList("editor", "strategyCards")).then(stgs => {
-          globals.strategies = stgs;
-          strategyCards.updateCards(globals.strategies);
+          selector = new ResDataSelector("exchange", "instrument", "underlying",
+            "expiries", "strikes", "ce_pe", "seldate-picker", "seltimeslider", "erroralert", 
+            updateData, disablePageInteractions, enablePageInteractions, (tm) => {});
           
-          UIUtils.rmSpinner("buy"); UIUtils.rmSpinner("sell");
-        });
-        
-      }).catch(error => {
-        UIUtils.showAlert("erroralert", error);
-        UIUtils.rmSpinner("buy"); UIUtils.rmSpinner("sell");
-      });
+          selector.cacheAllSelectors()
+            .then(data => {
+              if (!globals.calendar) {
+                globals.calendar = new TradingCalendar();
+                globals.symbols.loadCalendar(globals.calendar).then( () => {
+                  DBFacade.fetchUserData(new StrategyList("editor", "strategyCards")).then(stgs => {
+                    globals.strategies = stgs;
+                    strategyCards.updateCards(globals.strategies);
+                  });
 
-      var collapseElementList = [].slice.call(document.querySelectorAll('.collapse'));
-      var collapseList = collapseElementList.map(function (collapseEl) {
-          return new bootstrap.Collapse(collapseEl)
+                  simControl = new SimulationControl("livecontrol", "simdate-picker", 
+                                                "simtime-slider", sliderUpdateCallback);
+              enablePageInteractions();
+                });
+              } else {
+                DBFacade.fetchUserData(new StrategyList("editor", "strategyCards")).then(stgs => {
+                  globals.strategies = stgs;
+                  strategyCards.updateCards(globals.strategies);
+                });
+              }
+
+              // Load in background, no visual indication
+              autocomp.loadList(data).then(() => { 
+                watchlist.init(autocomp);
+              });
+            })
+            .catch(error => {
+              UIUtils.showAlert("erroralert", error);
+              enablePageInteractions();
+            });
+
+          stgHandler = new StrategyListEditorHandler(selector, "editor", "strategyCards", "erroralert");
         });
+      
+      var collapseElementList = [].slice.call(document.querySelectorAll('.collapse'));
+      
+      var collapseList = collapseElementList.map( function (collapseEl) {
+        return new bootstrap.Collapse(collapseEl)
+      });
 
 /*       var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
       var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
@@ -406,25 +427,23 @@
         });
       }); */
 
-      stgHandler = new StrategyListEditorHandler(selector, "editor", "strategyCards", "erroralert");
-
       // Custom Event handlers
       watchlist.addEventListener("buyinst", function(event) {
-        console.log("Caught buyinst from watch list");
+        //console.log("TRC: Caught buyinst from watch list");
         addLegWatchList(event, "BUY");
       });
       watchlist.addEventListener("sellinst", function(event) {
-        console.log("Caught sellinst from watch list");
+        //console.log("TRC: Caught sellinst from watch list");
         addLegWatchList(event, "SELL");
       });
       watchlist.addEventListener("slctinst", function(event) {
-        console.log("Caught slctinst from watch list");
+        //console.log("TRC: Caught slctinst from watch list");
         updateSelectorFromWatch(event);
       });
     }
 
     function log(data) {
-      console.log("Logging from event handler [" + data + "]");
+      console.log("INF: Logging from event handler [" + data + "]");
     }
 
     function toggleCollapseIcon(node) {
@@ -436,13 +455,13 @@
         selector.isCollapsed = true;
       } else {
         selector.isCollapsed = false;
-        selector.fetchRecords();
+        //selector.fetchRecords();
       }
     }
 
     function addLegWatchList(event, action) {
       let watchcard = watchlist.getCard(event.detail.cardid);
-      console.log("add leg watch list [" + watchcard.LTP + "]");
+      //console.log("DBG: add leg watch list [" + watchcard.LTP + "]");
       addLeg( null, action, watchcard.instrument,
               parseInt(watchcard.QTY), parseFloat(watchcard.LTP) );
     }
@@ -487,25 +506,25 @@
         }
 
         if (leg.entryValue) {
-          console.log("leg value: " + leg.entryValue);
-          console.log(`Leg added [${strategy.add(leg)}]`);
-          console.log(`Strategy Entry Value [${strategy.entryValue}]`);
+          strategy.add(leg);
+          //console.log("DBG: leg value: " + leg.entryValue);
+          //console.log(`DBG: Strategy Entry Value [${strategy.entryValue}]`);
 
           editor.update(strategy);
           if (id) {
             UIUtils.rmSpinner(id);
           }
         } else {
-          console.log(JSON.stringify(leg));
+          //console.log("DBG: " + JSON.stringify(leg));
         
           throw new Error("Unable to calculate value of the leg");
         }
       } catch(error) {
 
         if (error instanceof ResError) {
-          console.log(error.toString());
+          console.log("ERR: " + error.toString());
         } else {
-          console.log(`Unknown Error [${error}]`);
+          console.log(`ERR: Unknown Error [${error}]`);
         }
 
         if (id) {
@@ -525,7 +544,7 @@
       UIUtils.rmSpinner("sell");
     }
 
-    function getRecords(response) {
+    function updateData(response) {
 
       if (response instanceof RecordList) {
         let one = response.one;
@@ -550,7 +569,7 @@
         UIUtils.showAlert("erroralert", response);
       }
 
-       /* let watchList = document.getElementById("watchlist");
+       let watchList = document.getElementById("watchlist");
        if (watchList && watchList.count == 0) {
         let instrument = selector.instrument;
         
@@ -559,61 +578,36 @@
          instrument.makeFuture(2).then((futInst) => watchList.append(futInst));
          instrument.makeIndex().then((idxInst) => watchList.append(idxInst));
          instrument.makeIndex("VIX").then((idxInst) => watchList.append(idxInst));
-       } */
+       }
     }
   
     function sliderUpdateCallback(timestamp) {
+      disablePageInteractions();  // Disable the Page interactions, enable only after fetchRecs
       let watchList = document.getElementById("watchlist");
 
       watchList.updateAll(timestamp);
 
       stgHandler.updateAll(timestamp)
-              .then(() => {console.log("In Slider Callback : Success updating strategies");})
+              .then(() => { 
+                enablePageInteractions();
+                //console.log("TRC: In Slider Callback : Success updating strategies"); 
+              })
               .catch((error) => {
-                console.log("In Slider Callback : Error updating strategies");
+                enablePageInteractions();
+                console.log("ERR: In Slider Callback : Error updating strategies");
                 console.log(error);
               });
     }
 
-    function liveMonitor(node) {
-      let jElem = $(node);
-      if (jElem.data("live")) {
-        // Disable Live Monitoring
-        jElem.data("live", false);
-        jElem.removeClass("bg-primary text-light");
-        clearInterval(jElem.data("timer"));
-        jElem.find(".badge").text("00");
-      } else {
-        jElem.data("live", true);
-        jElem.toggleClass("bg-primary text-light");
-        let badge = jElem.find(".badge");
-        badge.text(refreshDuration.toString());
-        let id = setInterval(function() {
-          let timeLeft = parseInt(badge.text());
-          if (timeLeft === 0) {
-            timeLeft = refreshDuration;
-            badge.text((timeLeft < 10) ? "0" + timeLeft : timeLeft.toString());
-
-            // Update the time slider, move it forward by 1 min (60000 msec)
-            selector.timeSliderVal = selector.timeSliderVal + 60000;
-          } else {
-            timeLeft--;
-            badge.text((timeLeft < 10) ? "0" + timeLeft : timeLeft.toString());
-          }
-          
-        }, 1000);
-        jElem.data("timer", id);
-      }
-    }
-
     function autocompSelected(node) {
       const option = node.value;
-      console.log("selected autocomp option [" + option + "]");
+      //console.log("TRC: selected autocomp option [" + option + "]");
       const watchList = document.getElementById("watchlist");
       const options = document.getElementById("autocompleteOptions");
 
       //let inst = globals.symbols.makeInstrument(option);
       const inst = options.getInstrument(option);
+
       if (inst) {
         inst.simulationTS = selector.timeSliderVal;
         // console.log("Simulation Date for autocomp selected [" + inst.simulationDateYYYYMMDD + "]");

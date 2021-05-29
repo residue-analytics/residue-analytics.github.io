@@ -1,26 +1,10 @@
-
-class Trade {
-  constructor(instrument, tod, isBuy, qty, prc) {
-    this.inst = instrument;
-    this.tod = tod;
-    this.isBuy = isBuy;
-    this.isSell = !this.isBuy;
-    this.qty = qty;
-    this.prc = prc;
-
-    let dateObj = new Date(tod);
-    this.day = dateObj.getFullYear().toString();
-    this.day += (dateObj.getMonth() < 9) ? '0' + (dateObj.getMonth() + 1) : "" + (dateObj.getMonth() + 1);
-    this.day += (dateObj.getDate() < 10) ? '0' + dateObj.getDate() : "" + dateObj.getDate();
-
-    console.log(`Trade Day [${this.day}] Time [${this.tod}]`);
-  }
-}
-
 class ResDatePicker extends HTMLDivElement {
+  // Raises "change" event when the date is changed by the User
+  // Changed local Date() object can be retrieved through "value" property
   constructor() {
     super();
     this.dates = [];
+    this.sym = null;
     //document.addEventListener('DOMContentLoaded', () => this.init());
   }
 
@@ -30,7 +14,7 @@ class ResDatePicker extends HTMLDivElement {
   }
 
   init() {
-    //console.log("Date Picker : init()");
+    //console.log("TRC: Date Picker : init()");
     this.input = this.querySelector("input[type='text']");
 
     $(this.input).datepicker({
@@ -40,7 +24,7 @@ class ResDatePicker extends HTMLDivElement {
     });
 
     $(this.input).datepicker().on( "changeDate", (evt) => {
-      //console.log("Date Picker : Date Changed");
+      //console.log("TRC: Date Picker : Date Changed");
       if (evt.date) {
         this.dispatchEvent(new Event('change'));
       }
@@ -49,31 +33,31 @@ class ResDatePicker extends HTMLDivElement {
 
   updateDates(dates) {
     this.dates = dates;
+    this.sym = null;
     if (!this.input) {
       this.init();
     }
-
-    //this.dates = dates.map( d => DateOps.crtUTCFromUTCYYYYMMDD(d) );
-
-    //console.log("update dates " + this.dates);
-    //$(this.node).datepicker('update', dates.map( d => DateOps.crtLocalFromUTCYYYYMMDD(d) ));
   }
 
   showDay(d) {
-    //console.log("Date Picker : showDay " + d);
-    const ymd = DateOps.toLocalYYYYMMDDFromDate(d);
-    return this.dates.includes(ymd);
+    // d is local date
+    //console.log("TRC: Date Picker : showDay " + d);
+    if (this.sym) {
+      return globals.calendar.isTradingDay(this.sym, new AwareDate(d.getTime()));
+    } else {
+      const ymd = DateOps.toLocalYYYYMMDDFromDate(d);
+      return this.dates.includes(ymd);
+    }
   }
 
   get value() {
     // Returns Local Date object, For UTC - getUTCDate
-    //console.log("Date Picker : get value " + $(this.input).datepicker('getDate'))
     return $(this.input).datepicker('getDate');
   }
   set value(dt) {
     // dt - Localized Date Object. For UTC use setUTCDate method on date picker
     if (typeof(dt) === 'string') {
-      //console.log("Date Picker : setting string date " + dt);
+      //console.log("DBG: Date Picker : setting string date " + dt);
       dt = DateOps.crtLocalFromUTCYYYYMMDD(dt);
     }
 
@@ -83,11 +67,14 @@ class ResDatePicker extends HTMLDivElement {
 customElements.define("date-picker", ResDatePicker, {extends: 'div'});
 
 class SimulationControl {
-  constructor(ctrlBtnID, datePickerID, timeSliderID) {
+  constructor(ctrlBtnID, datePickerID, timeSliderID, simtimeUpdateCallback) {
     // datePicker must be RedDatePicker Element
+    // SimulationControl is to be constructed after Calendar is loaded
+    this.exc = "ECONOMY";
     this.ctrlBtnID = ctrlBtnID;
     this.datePickerID = datePickerID;
     this.timeSliderID = timeSliderID;
+    this.simtimeUpdateCallback = simtimeUpdateCallback;
 
     this.ctrlBtnEl = document.getElementById(this.ctrlBtnID);
     this.datePickerEl = document.getElementById(this.datePickerID);
@@ -97,9 +84,9 @@ class SimulationControl {
       skin: "round",
       type: "single",
       grid: true,
-      min: UIUtils.dateToTS(new Date(2021, 1, 1, 9, 15)),
-      max: UIUtils.dateToTS(new Date(2021, 1, 1, 15, 30)),
-      from: UIUtils.dateToTS(new Date(2021, 1, 1, 12, 0)),
+      min: UIUtils.dateToTS(new Date(2021, 0, 1, 9, 15)),
+      max: UIUtils.dateToTS(new Date(2021, 0, 1, 15, 30)),
+      from: UIUtils.dateToTS(new Date(2021, 0, 1, 12, 0)),
       //to: UIUtils.dateToTS(new Date("2021-01-01T13:00:00+05:30")),
       force_edges: true,
       prettify: DateOps.toLocalFullPIDisplayFromTimestampMSecs,
@@ -109,20 +96,100 @@ class SimulationControl {
 
     this.timeSlider = $(this.timeSliderEl).data('ionRangeSlider');
 
-    this.dateInputEl.addEventListener('change', ev => this.updateDatetimeSlider(ev));
+    this.datePickerEl.sym = this.exc;
+    this.datePickerEl.init();
+
+    this.ctrlBtnEl.addEventListener('click', (ev) => this.livemonitor(ev));
+    this.datePickerEl.addEventListener('change', (ev) => this.updateDatetimeSlider(ev));
+  }
+
+  liveMonitor(event) {
+
+    let jElem = $(this.ctrlBtnEl);
+    if (jElem.data("live")) {
+      // Disable Live Monitoring
+      jElem.data("live", false);
+      jElem.removeClass("bg-primary text-light");
+
+      clearInterval(jElem.data("timer"));
+      jElem.find(".badge").text("00");
+    } else {
+      jElem.data("live", true);
+      jElem.toggleClass("bg-primary text-light");
+
+      let badge = jElem.find(".badge");
+      badge.text(refreshDuration.toString());
+
+      let id = setInterval(function() {
+        let timeLeft = parseInt(badge.text());
+        if (timeLeft === 0) {
+          timeLeft = refreshDuration;
+          badge.text((timeLeft < 10) ? "0" + timeLeft : timeLeft.toString());
+
+          // Update the time slider, move it forward by 1 min (60000 msec)
+          this.currentSimTimestamp = this.currentSimTimestamp + 60000;
+
+          // Check the trading session end and then move to next trading day
+        } else {
+          timeLeft--;
+          badge.text((timeLeft < 10) ? "0" + timeLeft : timeLeft.toString());
+        }
+        
+      }, 1000);
+
+      jElem.data("timer", id);
+    }
   }
 
   updateDatetimeSlider(ev) {
     // Change the slider min, max, from when the date picker changes
+    //console.log("TRC: Triggered date time slider update");
+
+    let date = this.datePickerEl.value;  // Localized Selected Date() object
+    if (!date) {
+      // We choose 1-Jan-2021 as the init date
+      //console.log("TRC: No date found with the date selector");
+      date = new Date(2021, 0, 1);
+    }
+
+    if (globals.calendar) {
+      //console.log("TRC: slider update : calendar present " + date);
+      const session = globals.calendar.nextTradingSession(this.exc, date);
+      //console.log(session);
+
+      this.timeSlider.update({
+        min: session.start.getTime(),
+        max: session.end.getTime(),
+        from: session.mid.getTime()
+      });
+    } else {
+      //console.log("TRC: slider update : no calendar " + date);
+      this.timeSlider.update({
+        min: date.getTime() + 33300000,
+        max: date.getTime() + 56700000,
+        from: date.getTime() + 43220000
+      });
+    }
   }
 
   timesliderUpdated(data) {
     // Raise Event whenever the slider moves
+    this.simtimeUpdateCallback(data.from);
+  }
+
+  get currentSimTimestamp() {
+    // Value at the Time Slider's thumb in msec
+    return this.timeSlider.result.from;
+  }
+  set currentSimTimestamp(val) {
+    this.timeSlider.update({
+      from: val
+    });
   }
 }
 
 class ResDataSelector {
-  constructor(excID, instID, undID, expID, stkID, cepeID, daysID, dateSliderID, 
+  constructor(excID, instID, undID, expID, stkID, cepeID, daysID,  
     timeSliderID, errID, dataRefreshCallback, disablePageCallback, enablePageCallback,
     sliderUpdateCallback) {
     
@@ -133,7 +200,6 @@ class ResDataSelector {
     this.stkID = stkID;
     this.cepeID = cepeID;
     this.daysID = daysID;
-    this.dateSliderID = dateSliderID;
     this.timeSliderID = timeSliderID;
     this.errID = errID;
     this.callback = dataRefreshCallback;
@@ -157,35 +223,16 @@ class ResDataSelector {
     this.stkEl    = document.getElementById(this.stkID);
     this.cepeEl   = document.getElementById(this.cepeID);
     this.daysEl = document.getElementById(this.daysID);
-    this.dateSliderEl = document.getElementById(this.dateSliderID);
     this.timeSliderEl = document.getElementById(this.timeSliderID);
     this.errEl    = document.getElementById(this.errID);
-
-    if (this.dateSliderEl) {
-      let initDates = ["01-01-2021", "01-02-2021", "01-03-2021"];
-
-      $(this.dateSliderEl).ionRangeSlider({
-        skin: "round",
-        type: "single",
-        grid: true,
-        values: initDates,
-        from: 0,   // initDates.indexOf("2021-01-01")
-        //to: 2,   // initDates.indexOf("2021-01-03")
-        force_edges: true,
-        onFinish: (data) => { this.fetchRecords(); },  // This should update time slider only
-        onUpdate: (data) => { this.fetchRecords(); }   // This should update time slider only
-      });
-
-      this.dateSlider = $(this.dateSliderEl).data('ionRangeSlider');
-    }
 
     $(this.timeSliderEl).ionRangeSlider({
       skin: "round",
       type: "single",
       grid: true,
-      min: UIUtils.dateToTS(new Date(2021, 1, 1, 9, 15)),
-      max: UIUtils.dateToTS(new Date(2021, 1, 1, 15, 30)),
-      from: UIUtils.dateToTS(new Date(2021, 1, 1, 12, 0)),
+      min: UIUtils.dateToTS(new Date(2021, 0, 1, 9, 15)),
+      max: UIUtils.dateToTS(new Date(2021, 0, 1, 15, 30)),
+      from: UIUtils.dateToTS(new Date(2021, 0, 1, 12, 0)),
       //to: UIUtils.dateToTS(new Date("2021-01-01T13:00:00+05:30")),
       force_edges: true,
       prettify: DateOps.toLocalFullPIDisplayFromTimestampMSecs,
@@ -200,35 +247,40 @@ class ResDataSelector {
 
   fetchSymbols() {
     
-    DBFacade.fetchLists().then(symList => {
-      this.cacheSyms = symList;
+    if (globals.symbols) {
+      this.cacheSyms = globals.symbols;
       this.loadExchanges();
-    });
+    } else {
+      DBFacade.fetchLists().then(symList => {
+        this.cacheSyms = symList;
+        this.loadExchanges();
+      });
+    }
   }
 
   setupEventHandlers() {
-    this.excEl.addEventListener('change', ev => this.loadInstruments(ev));
-    this.excEl.addEventListener('update-sel', ev => this.loadInstruments(ev));
+    this.excEl.addEventListener('change',      ev => this.loadInstruments(ev));
+    this.excEl.addEventListener('update-sel',  ev => this.loadInstruments(ev));
 
-    this.instEl.addEventListener('change', ev => this.loadUnderlying(ev));
+    this.instEl.addEventListener('change',     ev => this.loadUnderlying(ev));
     this.instEl.addEventListener('update-sel', ev => this.loadUnderlying(ev));
 
-    this.undEl.addEventListener('change', ev => this.loadExpiries(ev));
-    this.undEl.addEventListener('change', ev => this.loadDays(ev));
-    this.undEl.addEventListener('update-sel', ev => this.loadExpiries(ev));
-    this.undEl.addEventListener('update-sel', ev => this.loadDays(ev));
+    this.undEl.addEventListener('change',      ev => this.loadExpiries(ev));
+    this.undEl.addEventListener('change',      ev => this.loadDays(ev));
+    this.undEl.addEventListener('update-sel',  ev => this.loadExpiries(ev));
+    this.undEl.addEventListener('update-sel',  ev => this.loadDays(ev));
 
-    this.expEl.addEventListener('change', ev => this.loadStrikes(ev));
-    this.expEl.addEventListener('change', ev => this.loadDays(ev));
-    this.expEl.addEventListener('update-sel', ev => this.loadStrikes(ev));
-    this.expEl.addEventListener('update-sel', ev => this.loadDays(ev));
+    this.expEl.addEventListener('change',      ev => this.loadStrikes(ev));
+    this.expEl.addEventListener('change',      ev => this.loadDays(ev));
+    this.expEl.addEventListener('update-sel',  ev => this.loadStrikes(ev));
+    this.expEl.addEventListener('update-sel',  ev => this.loadDays(ev));
 
-    this.stkEl.addEventListener('change', ev => this.updateDatetimeSlider(ev));
-    this.cepeEl.addEventListener('change', ev => this.updateDatetimeSlider(ev));
-    this.stkEl.addEventListener('update-sel', ev => this.updateDatetimeSlider(ev));
+    this.stkEl.addEventListener('change',      ev => this.updateDatetimeSlider(ev));
+    this.cepeEl.addEventListener('change',     ev => this.updateDatetimeSlider(ev));
+    this.stkEl.addEventListener('update-sel',  ev => this.updateDatetimeSlider(ev));
     this.cepeEl.addEventListener('update-sel', ev => this.updateDatetimeSlider(ev));
 
-    this.daysEl.addEventListener('change', ev => this.updateDatetimeSlider(ev));
+    this.daysEl.addEventListener('change',     ev => this.updateDatetimeSlider(ev));
     this.daysEl.addEventListener('update-sel', ev => this.updateDatetimeSlider(ev));
   }
 
@@ -325,7 +377,7 @@ class ResDataSelector {
           if (data.days) {
             //UIUtils.updSelectDropdown(this.daysID, data.days, true);
             this.daysEl.updateDates(data.days);
-            //UIUtils.updateDatetimeSlider(this.sliderID, this.daysID, true);  //singleThumb fixed?
+
             if (event.detail && event.detail.trade) {
               this.daysEl.value = event.detail.trade.day;
               this.daysEl.dispatchEvent(new CustomEvent("update-sel", {
@@ -340,12 +392,10 @@ class ResDataSelector {
 
           UIUtils.rmSpinner(this.expID);
         }).catch(error => {
-          console.log("Error fetching expiries : " + error);
+          console.log("ERR: fetching expiries : " + error);
           UIUtils.showAlert(this.errID, error);
           UIUtils.rmSpinner(this.expID);
         });
-      } else {
-        console.log("Exp: Ignore this change");
       }
     }
   }
@@ -392,12 +442,10 @@ class ResDataSelector {
 
         UIUtils.rmSpinner(this.stkID);
       }).catch(error => {
-        console.log("Error fetching strikes : " + error);
+        console.log("ERR: fetching strikes : " + error);
         UIUtils.showAlert(this.errID, error);
         UIUtils.rmSpinner(this.stkID);
       });
-    } else {
-      console.log("Strikes are loaded only for Options");
     }
   }
 
@@ -405,14 +453,12 @@ class ResDataSelector {
     if (this.instEl.value === "INDEX" || this.instEl.value === "FUTURES") {
       // Load Days
       this.disableCallback();
-      //UIUtils.addSpinner(this.daysID);
       let leaf = this.cacheSyms.getLeaf(this.excEl.value, this.instEl.value, this.undEl.value);
       let exp = null;
       if (this.instEl.value === "FUTURES") {
         exp = this.expEl.value;
         if (exp == 0) {
-          console.log("Expiry not yet updated");
-          //UIUtils.rmSpinner(this.daysID);
+          //console.log("DBG: Expiry not yet updated");
           return;
         }
       }
@@ -421,7 +467,7 @@ class ResDataSelector {
         if (data.days) {
           //UIUtils.updSelectDropdown(this.daysID, data.days, true);
           this.daysEl.updateDates(data.days);
-          //UIUtils.updateDatetimeSlider(this.sliderID, this.daysID, true);  // SingleThumb?
+
           if (event.detail && event.detail.trade) {
             this.daysEl.value = event.detail.trade.day;
             this.daysEl.dispatchEvent(new CustomEvent("update-sel", {
@@ -433,57 +479,29 @@ class ResDataSelector {
             }));
           }
         }
-
-        //UIUtils.rmSpinner(this.daysID);
       }).catch(error => {
-        console.log("Error fetching days : " + error);
+        console.log("ERR: fetching days : " + error);
         UIUtils.showAlert(this.errID, error);
-        //UIUtils.rmSpinner(this.daysID);
       });
-    } else {
-      //console.log("Days: Ignore this change");
     }
 
     this.disableUnwanted();
   }
 
   updateDatetimeSlider(event) {
-    //console.log("Triggered date time slider update");
-    this.disableCallback();  // Disable the Page interactions, enable only after fetchRecs
+    //console.log("TRC: Triggered date time slider update");
 
-    if (this.dateSlider) {
-      let dateRange = [];
-      let options = this.daysEl.options;  // TODO: Won't work with date picker
-      let fromIdx = 0;
-      for (let i = 0; i < options.length; i++) {
-        dateRange.push(options[i].label);
-        if (event.detail && event.detail.trade && options[i].value == event.detail.trade.day) {
-          fromIdx = i;
-        }
-      }
-      
-      this.dateSlider.update({
-        from: fromIdx,
-        values: dateRange
-      });
+    let date = this.daysEl.value;  // Localized Selected Date() object
+    if (!date) {
+      // We choose 1-Jan-2021 as the init date
+      //console.log("TRC: No date found with the date selector");
+      date = new Date(2021, 0, 1);
     }
 
-    /* const date = this.daysEl.value.substr(0, 4) + "-" + this.daysEl.value.substr(4, 2) + "-" + this.daysEl.value.substr(6, 2);
-    let fromVal = UIUtils.dateToTS(new Date(date + UIUtils.DAY_MID));
-    if (event.detail && event.detail.trade) {
-      fromVal = event.detail.trade.tod;
-    }
-    this.timeSlider.update({
-      min: UIUtils.dateToTS(new Date(date + UIUtils.DAY_START)),
-      max: UIUtils.dateToTS(new Date(date + UIUtils.DAY_END)),
-      from: fromVal
-    }); */
-
-    const date = this.daysEl.value;  // Localized Selected Date() object
     if (globals.calendar) {
-      console.log("slider update : calendar present " + date);
+      //console.log("TRC: slider update : calendar present " + date);
       const session = globals.calendar.nextTradingSession(this.sym, date);
-
+      //console.log(session);
       let fromVal = null;
       if (event.detail && event.detail.trade) {
         fromVal = event.detail.trade.tod;
@@ -497,7 +515,7 @@ class ResDataSelector {
         from: fromVal
       });
     } else {
-      console.log("slider update : no calendar " + date);
+      //console.log("TRC: slider update : no calendar " + date);
       this.timeSlider.update({
         min: date.getTime() + 33300000,
         max: date.getTime() + 56700000,
@@ -508,7 +526,7 @@ class ResDataSelector {
 
   updateSelectors(record) {
     // Set the values of the dropdowns as given record (Instrument or Trade)
-    this.loadExchanges(record);  // This will cascading trigger listeners for all
+    this.loadExchanges(record);  // This will initiate cascading trigger listeners for all
   }
 
   sleep(ms) {
@@ -550,7 +568,7 @@ class ResDataSelector {
   }
 
   fetchRecords(dataORevent=null) {  // data when call is from the slider, event when from event listener and null when from main page
-    // console.log("selector fetchrecs");
+    // console.log("TRC: selector fetchrecs");
     this.disableCallback();  // Disable the Page interactions
 
     DBFacade.fetchRecs(this.excEl.value, this.instEl.value, this.undEl.value,
@@ -558,13 +576,13 @@ class ResDataSelector {
       this.stkEl.value, this.cepeEl.value, null, null)
       .then(response => { 
         this.callback(response);
-        // console.log("selector fetchrecs success");
+        // console.log("DBG: selector fetchrecs success");
         this.enableCallback();  // Enable the Page interactions
       } )
       .catch(error => { 
         //console.log(error);
         this.callback(error);
-        // console.log("selector fetchrecs failure");
+        // console.log("DBG: selector fetchrecs failure");
         this.enableCallback();  // Enable the Page interactions
       });
   }
@@ -594,7 +612,6 @@ class ResDataSelector {
     // Value at the Time Slider's thumb in msec
     return this.timeSlider.result.from;
   }
-  
   set timeSliderVal(val) {
     this.timeSlider.update({
       from: val
@@ -622,425 +639,144 @@ class ResDataSelector {
   }
 }
 
-/* // Not in Use
-class StrategyCardRenderer {
-
-  constructor(cardTemplate=null, editorTemplate=null) {
-    if (StrategyCardRenderer.instance) {
-      return StrategyCardRenderer.instance;
-    }
-
-    // These all members are not used any more.
-    this.valueCardHTML = `
-    <div class="col mb-3" id="STG_ID"> 
-      <div class="card shadow-sm">
-        <div class="card-header">
-          <div>STG_NAME
-            <a class="bi-trash text-danger float-end" href="#" 
-              onclick="deleteStrategy(\'STG_ID\')" aria-label="Remove"></a> 
-            <a class="bi-pencil-square text-primary float-end me-2" href="#" aria-label="Edit" 
-              onclick="editStrategy(\'STG_ID\')"></a> 
-          </div>
-        </div> 
-        <div class="card-body text-center"> BODY_DATA </div> 
-        <div class="card-footer text-muted"> <small>FOOTER_DATA</small> </div> 
-      </div> 
-    </div>`;
-
-    if (cardTemplate) {
-      //let temp = document.getElementById(cardTemplate);
-      //this.valueCardHTML = temp.innerHTML;
-    }
-
-    this.fullCardHTML = `
-    <div class="col">
-      <div class="card text-center mb-3" id="STG_ID"> 
-        <div class="card-header"> 
-          <div class="d-flex"> 
-            <div class="me-auto align-self-center"> 
-              <span>STG_NAME</span>
-            </div> 
-            <ul class="nav nav-pills" role="tablist"> 
-              <li class="nav-item" role="presentation"> 
-                <a href="#" class="nav-link active" id="legs-tabSTG_ID" data-bs-toggle="pill" 
-                  data-bs-target="#legsSTG_ID" type="button" role="tab" aria-controls="legs" 
-                  aria-selected="true">Legs</a>
-              </li> 
-              <li class="nav-item" role="presentation"> 
-              <a href="#" class="nav-link" id="greeks-tabSTG_ID" data-bs-toggle="pill" 
-                data-bs-target="#greeksSTG_ID" type="button" role="tab" aria-controls="greeks" 
-                aria-selected="false">Greeks</a> 
-              </li> 
-              <li class="nav-item" role="presentation"> 
-                <a href="#" class="nav-link disabled" id="other-tabSTG_ID" data-bs-toggle="pill" 
-                  data-bs-target="#otherSTG_ID" type="button" role="tab" aria-controls="other" 
-                  aria-selected="false" tabindex="-1" aria-disabled="true">Disabled</a> 
-              </li> 
-            </ul> 
-          </div> 
-        </div> 
-        <div class="card-body tab-content"> 
-          <div class="tab-pane fade show active" id="legsSTG_ID" role="tabpanel" 
-            aria-labelledby="legs-tabSTG_ID"> 
-            <div class="table-responsive"> 
-              <table class="table caption-top table-sm"> 
-                <thead>
-                  <tr> 
-                    <th scope="col">#</th> 
-                    <th scope="col">Instrument</th> 
-                    <th scope="col">B/S</th> 
-                    <th scope="col">Qty</th> 
-                    <th scope="col">Entry Price</th> 
-                    <th scope="col">Current Price</th> 
-                    <th scope="col">Live P&L</th> 
-                    <th scope="col">Exit Price</th> 
-                    <th scope="col">P&L</th> 
-                    <th scope="col"> </th>  
-                  </tr>
-                </thead> 
-                <tbody>STG_LEGS</tbody> 
-                <tfoot> STG_FOOTER </tfoot> 
-              </table> 
-            </div> 
-          </div> 
-          <div class="tab-pane fade" id="greeksSTG_ID" role="tabpanel" 
-            aria-labelledby="greeks-tabSTG_ID"> Greeks </div>  
-          <div class="tab-pane fade" id="otherSTG_ID" role="tabpanel" 
-            aria-labelledby="other-tabSTG_ID"> Other </div> 
-        </div> 
-        <div class="card-footer text-muted"> 
-          <small>FOOTER_DATA</small> 
-          <a href="#" class="me-2 bi-save-fill text-success float-end" 
-            onclick="saveStrategy(\'STG_ID\')"></a> 
-          <a href="#" class="me-2 bi-trash text-danger float-end" 
-            onclick="deleteStrategy(\'STG_ID\')"></a> 
-        </div>
-      </div>
-    </div>`;
-
-    if (editorTemplate) {
-      //let temp = document.getElementById(editorTemplate);
-      //this.fullCardHTML = temp.innerHTML;
-    }
-  }
-  
-  static getInstance() {
-    if (!StrategyCardRenderer.instance) {
-      StrategyCardRenderer.instance = new StrategyCardRenderer();
-    }
-
-    return StrategyCardRenderer.instance;
+class DragNDropManager {
+  // Parent must call attachEventHandlersTo() & provide save() to save the reordered list
+  //
+  constructor(parentNode) {
+    // All the elements that are 'draggable' must be children of this parentNode
+    this.parentNode = parentNode;
+    this.id = parentNode.id;
+    this.parentNode.dragover = (ev, elem) => this.dragover(ev, elem);
+    this.placeholder = null;
+    this.movedCardNIdx = null;
   }
 
-  getValueCard(stg) {
-    // Raises delstg and edtstg events
-    if (!stg) {
-      return "";
-    }
-    
-    let value = stg.curValue.toFixed(2);
-
-    let html = `
-    <div class="col mb-3" id="${stg.id}"> 
-      <div class="card shadow-sm">
-        <div class="card-header">
-          <div>${stg.name}
-            <a class="bi-trash text-danger float-end" href="#/" 
-              onclick="this.dispatchEvent(new CustomEvent('delstg', {
-                bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } 
-              }))" aria-label="Remove"></a> 
-            <a class="bi-pencil-square text-${stg.isinFullView ? "danger" : "primary"} float-end me-2" href="#/" aria-label="Edit" 
-              onclick="this.dispatchEvent(new CustomEvent('edtstg', {
-                bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } 
-              }))"></a> 
-          </div>
-        </div> 
-        <div class="card-body text-center">
-          <h5 class="card-title text-${value >= 0 ? "success" : "danger"}">${value}</h5>
-          <span>${stg.count.toString()} Legs</span>
-        </div> 
-        <div class="card-footer text-muted"> 
-          <small> Created: ${new Date(stg.createTime).toLocaleString()}</small> 
-        </div> 
-      </div> 
-    </div>`;
-
-    return html;
-  }
-
-  getFullCard(stg) {
-    // // Raises savstg, delleg and delstg events
-    if (!stg) {
-      return "";
-    }
-
-    let allLegs = "";
-    for (let i = 0; i < stg.legs.length; i++) {
-      let leg = stg.legs[i];
-
-      let row = `<tr>
-      <th scope="row">${(i + 1).toString()}</th>
-      <td> ${leg.key}</td>
-      <td>${leg.isBuy ? "Buy" : "Sell"}</td>
-      <td>${leg.isBuy ? "" : "-"}${leg.tqty.toString()}</td>
-      <td>${leg.entryPrice.toFixed(2)}</td>
-      <td>${leg.curPrice.toFixed(2)}</td>
-      <td class=${leg.curPosition >= 0 ? "text-success" : "text-danger"}>${leg.curPosition.toFixed(2)}</td>
-      <td></td>
-      <td></td>
-      <td>
-        <a class="bi-trash text-danger" href="#/" aria-label="Remove" 
-          onclick="this.dispatchEvent(new CustomEvent('delleg', {
-            bubbles: true, cancelable: true, detail: { stg: '${stg.id}', leg: '${leg.id}' } 
-          }))"></a>
-      </td>
-      </tr>
-      `;
-
-      allLegs += row;
-    }
-
-    let footer = `<tr> 
-    <td></td> 
-    <td></td> 
-    <td></td> 
-    <td></td> 
-    <td></td> 
-    <td></td> 
-    <td>0</td> 
-    <td></td> 
-    <td>0</td> 
-    </tr>`;
-
-    let fullCardHTML = `
-      <div class="card text-center mb-3" id="${stg.id}"> 
-        <div class="card-header"> 
-          <div class="d-flex"> 
-            <div class="me-auto align-self-center"> 
-              <span>${stg.name}</span>
-            </div> 
-            <ul class="nav nav-pills" role="tablist"> 
-              <li class="nav-item" role="presentation"> 
-                <a href="#" class="nav-link active" id="legs-tab${stg.id}" data-bs-toggle="pill" 
-                  data-bs-target="#legs${stg.id}" type="button" role="tab" aria-controls="legs" 
-                  aria-selected="true">Legs</a>
-              </li> 
-              <li class="nav-item" role="presentation"> 
-              <a href="#" class="nav-link" id="greeks-tab${stg.id}" data-bs-toggle="pill" 
-                data-bs-target="#greeks${stg.id}" type="button" role="tab" aria-controls="greeks" 
-                aria-selected="false">Greeks</a> 
-              </li> 
-              <li class="nav-item" role="presentation"> 
-                <a href="#" class="nav-link disabled" id="other-tab${stg.id}" data-bs-toggle="pill" 
-                  data-bs-target="#other${stg.id}" type="button" role="tab" aria-controls="other" 
-                  aria-selected="false" tabindex="-1" aria-disabled="true">Disabled</a> 
-              </li> 
-            </ul> 
-          </div> 
-        </div> 
-        <div class="card-body tab-content"> 
-          <div class="tab-pane fade show active" id="legs${stg.id}" role="tabpanel" 
-            aria-labelledby="legs-tab${stg.id}"> 
-            <div class="table-responsive"> 
-              <table class="table caption-top table-sm"> 
-                <thead>
-                  <tr> 
-                    <th scope="col">#</th> 
-                    <th scope="col">Instrument</th> 
-                    <th scope="col">B/S</th> 
-                    <th scope="col">Qty</th> 
-                    <th scope="col">Entry Price</th> 
-                    <th scope="col">Current Price</th> 
-                    <th scope="col">Live P&L</th> 
-                    <th scope="col">Exit Price</th> 
-                    <th scope="col">P&L</th> 
-                    <th scope="col"> </th>  
-                  </tr>
-                </thead> 
-                <tbody>${allLegs}</tbody> 
-                <tfoot> ${footer} </tfoot> 
-              </table> 
-            </div> 
-          </div> 
-          <div class="tab-pane fade" id="greeks${stg.id}" role="tabpanel" 
-            aria-labelledby="greeks-tab${stg.id}"> Greeks </div>  
-          <div class="tab-pane fade" id="other${stg.id}" role="tabpanel" 
-            aria-labelledby="other-tab${stg.id}"> Other </div> 
-        </div> 
-        <div class="card-footer text-muted"> 
-          <small>Created On: ${new Date(stg.createTime).toLocaleString()}</small> 
-          <a href="#/" class="me-2 bi-save-fill text-success float-end" 
-            onclick=" this.dispatchEvent(new CustomEvent('savstg', {
-              bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } 
-            }))"></a> 
-          <a href="#/" class="me-2 bi-trash text-danger float-end" 
-            onclick="this.dispatchEvent(new CustomEvent('delstg', {
-              bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } 
-            }))"></a> 
-        </div>
-    </div>`;
-
-    return new StrategyFullCardElement(fullCardHTML, "col");
-  }
-}
-
-// Not in Use
-class StrategyCard extends Strategy {
-  constructor(name, stg=null) {
-    
-    super(name);
-    throw new Error("Cannot use StrategyCard");
-
-    //console.log(`Creating Card [${name}] ${ (stg) ? "with stg" : "without stg"}`);
-    this._fullCardParentJNode = null;
-    this._valueCardParentJNode = null;
-
-    this._fullCardJNode = null;
-    this._valueCardJNode = null;
-
-    if (stg) {
-      this._assign(stg);
-    }
-  }
-
-  setParentNodeIDs(fullNodeID, valueNodeID) {
-    //console.log(`Setting parents Full [${fullNodeID}], Mini [${valueNodeID}]`);
-    this._fullCardParentJNode = $("#" + fullNodeID);
-    this._valueCardParentJNode = $("#" + valueNodeID);
-  }
-
-  update() {
-    
-    //this._fullCardJNode = $(StrategyCardRenderer.getInstance().getFullCard(this));
-    this._fullCardJNode = $(new StrategyFullCardElement(this));
-    if (this.isinFullView) {
-      this.showInFullView();
-    }
-
-    //this._valueCardJNode = $(StrategyCardRenderer.getInstance().getValueCard(this));
-    this._valueCardJNode = $(new StrategyValueCardElement(this));
-    this.updateValueCardView();
-  }
-
-  _assign(other) {
-    // Takeover all attributes of other
-    super._assign(other);
-    this.update();
-  }
-
-  clone() {
-    let base = super.clone();
-    let newobj = new StrategyCard(base.name);
-    newobj._assign(base);
-
-    return newobj;
-  }
-
-  copy() {
-    let base = super.copy();
-    let newobj = new StrategyCard(base.name);
-    newobj._assign(base);
-
-    return newobj;
-  }
-
-  static fromObject(obj) {
-    let stg = Strategy.fromObject(obj);
-    
-    return new StrategyCard(stg.name, stg);
-  }
-
-  add(leg, settle) {
-    super.add(leg, settle);
-    this.update();
-  }
-
-  remove(legID) {
-    super.remove(legID);
-    this.update();
-  }
-
-  async updatePrice(tmstmp, resolve, reject) {
-    let res = await super.updatePrice(tmstmp, resolve, reject);
-    this.update();
-    return res;
-  }
-
-  async delete() {
-    this.removeFromViews();
-    return await super.delete();
-  }
-
-  get jFullCardNode() {
-    return this._fullCardJNode;
-  }
-
-  get jValueCardNode() {
-    return this._valueCardJNode;
-  }
-
-  get jFullViewNode() {
-    return this._fullCardParentJNode;
-  }
-
-  get jValueViewNode() {
-    return this._valueCardParentJNode;
-  }
-
-  get isinFullView() {
-    // Checks whether this card is in Full View or not
-    if (this.jFullViewNode) {
-      let child = this.jFullViewNode.find(".card");
-      if (child) {
-        return child.attr("id") === this.id;
-      }
-    }
-
-    return false;
-  }
-
-  showInFullView() {
-    if (this.jFullViewNode) {
-      this.jFullViewNode.empty().append(this.jFullCardNode);
-    }
-  }
-
-  get isinValueCardView() {
-    if (this.jValueViewNode) {
-      return this.jValueViewNode.children("#" + this.id).length > 0;
-    }
-  }
-
-  updateValueCardView() {
-    if (this.jValueViewNode) {
-      if (this.isinValueCardView) {
-        //console.log(`Replacing ${this.id} to ValueCardView ${this._valueCardParentJNode.attr("id")}`);
-        this.jValueViewNode.children("#" + this.id).replaceWith(this.jValueCardNode);
-      } else {
-        //console.log(`Apppending ${this.id} to ValueCardView ${this._valueCardParentJNode.attr("id")}`);
-        this.jValueViewNode.append(this.jValueCardNode);
+  getCardNIdx(id) {
+    const children = this.parentNode.children;
+    for (let i = 0; i < children.length; i++) {
+      if (children[i].id && id == children[i].id) {
+        return { "idx" : i, "card" : children[i] };
       }
     }
   }
 
-  removeFromViews() {
-    if (this.isinFullView) {
-      this.jFullViewNode.empty();
+  attachEventHandlersTo(card) {
+
+    card.addEventListener("dragstart", (ev) => this.dragstart(ev));
+
+    card.addEventListener("dragenter", function(ev) {
+      //console.log(`drag enter [${this.id}] tgt [${ev.target.id}] data [${ev.dataTransfer.getData("text")}]`);
+    });
+
+    card.addEventListener("drag", function(ev) {
+      this.style.position = "absolute";
+      this.style.top = `${ev.pageY}px`;
+      this.style.left = `${ev.pageX}px`;
+    });
+
+    card.addEventListener("dragover", function(ev) {
+      const tgtID = ev.dataTransfer.getData("text");
+      //console.log(`drag over [${this.id}] tgt [${ev.target.id}] data [${tgtID}]`);
+
+      // only a watchcard can be dropped on the watchlist
+      if (this.parentNode.movedCardNIdx && this.parentNode.movedCardNIdx.card.id === tgtID && 
+          this.id !== tgtID) {
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = "move";
+        this.parentNode.dragover(ev, this);
+      }
+    });
+
+    card.addEventListener("dragleave", function(ev) {
+      //console.log(`drag leave [${this.id}] tgt [${ev.target.id}] data [${ev.dataTransfer.getData("text")}]`);
+    });
+
+    card.addEventListener("drop", function(ev) {
+      ev.preventDefault();
+      //console.log(`drag drop [${this.id}] tgt [${ev.target.id}] data [${ev.dataTransfer.getData("text")}]`);
+      
+      this.parentNode.insertBefore(this.parentNode.movedCardNIdx.card, this);
+    });
+
+    card.addEventListener("dragend", (ev) => this.dragend(ev));
+  }
+
+  dragstart(ev) {
+    //console.log(`drag start [${this.id}] tgt [${ev.target.id}]`);
+
+    ev.dataTransfer.setData("text", ev.target.id);
+    ev.dataTransfer.effectAllowed = "move";
+
+    this.parentNode.movedCardNIdx = this.getCardNIdx(ev.target.id);
+    this.movedCardNIdx = this.parentNode.movedCardNIdx;
+
+    const rect = this.movedCardNIdx.card.getBoundingClientRect();
+    // Save the height and width of the card being moved
+    this.movedCardNIdx.height = rect.height;
+    this.movedCardNIdx.width = rect.width;
+    this.movedCardNIdx.card.style.cursor = "move";
+  }
+
+  crtPlaceholder() {
+    this.placeholder = document.createElement('div');
+    this.placeholder.id = "placeholder";
+    this.placeholder.setAttribute("name", "placeholder");
+    this.placeholder.style.height = this.movedCardNIdx.height.toString() + "px";
+    this.placeholder.style.width = this.movedCardNIdx.width.toString() + "px";
+    //console.log("Place holder height " + this.placeholder.style.height);
+    //console.log("Place holder width " + this.placeholder.style.width);
+
+    this.placeholder.addEventListener("drop", function(ev) {
+      ev.preventDefault();
+      //console.log(`drag drop on placeholder, data [${ev.dataTransfer.getData("text")}]`);
+      
+      this.parentNode.insertBefore(this.parentNode.movedCardNIdx.card, this);
+    });
+
+    this.placeholder.addEventListener("dragover", function(ev) {
+      //const tgtID = ev.dataTransfer.getData("text");
+      //console.log(`drag over [${this.id}] tgt [${ev.target.id}] data [${tgtID}]`);
+      
+      ev.preventDefault();
+    });
+  }
+
+  dragover(ev, overEl) {
+    if (!this.placeholder) {
+      this.crtPlaceholder();
     }
 
-    if (this.isinValueCardView) {
-      this.jValueViewNode.children("#" + this.id).remove();
+    // inserBefore can move the placeholder from previous position to new
+    this.parentNode.insertBefore(this.placeholder, overEl);
+  }
+
+  dragend(ev) {
+    //console.log(`drag end [${this.id}] tgt [${ev.target.id}] data [${ev.dataTransfer.getData("text")}]`);
+
+    this.movedCardNIdx = this.parentNode.movedCardNIdx;
+    this.movedCardNIdx.card.style.cursor = "move";
+    this.movedCardNIdx.card.style.removeProperty("top");
+    this.movedCardNIdx.card.style.removeProperty("left");
+    this.movedCardNIdx.card.style.removeProperty("position");
+    
+    if (this.placeholder) {
+      this.parentNode.removeChild(this.placeholder);
     }
+
+    this.movedCardNIdx = null;
+    this.parentNode.movedCardNIdx = null;
+    this.parentNode.save();
   }
 }
- */
 
 class StrategyFullCardElement extends HTMLDivElement {
-  constructor(stg=null) {
+  constructor(stg=null, showTrades=false) {
     super();
     // element created
-
-    this.innerHTML = this.getFullCard( (stg) ? stg : new Strategy("Edit Name") );
+    // We don't set this.stg as it will indicate an un-saved strategy present in the editor
+    this.innerHTML = this._getFullCard( (stg) ? stg : new Strategy("Edit Strategy"), showTrades);
+    this.addEventListener("shwtrd", event => this.showTrades(event));
+    this.tradesShowing = showTrades;
   }
 
   get current() {
@@ -1058,79 +794,27 @@ class StrategyFullCardElement extends HTMLDivElement {
     warning.show();
   }
 
-  update(stg=null) {
+  update(stg=null, showTrades=false) {
     $(this).empty();
     this.stg = stg;
-    this.innerHTML = this.getFullCard( (stg) ? stg : new Strategy("Edit Name") );
+    this.innerHTML = this._getFullCard( (stg) ? stg : new Strategy("Edit Name"), showTrades);
+    this.tradesShowing = showTrades;
   }
 
-  getFullCard(stg) {
-    // // Raises savstg, delleg and delstg events
-/*     if (!stg) {
-      // We can return an empty editor look
-      let stgid = Date.now();
-      return `
-      <div class="card text-center mb-3" id="${stgid}"> 
-        <div class="card-header"> 
-          <div class="d-flex"> 
-            <div class="me-auto align-self-center"> 
-              <span>New Strategy</span>
-            </div> 
-            <ul class="nav nav-pills" role="tablist"> 
-              <li class="nav-item" role="presentation"> 
-                <a href="#" class="nav-link active" id="legs-tab${stgid}" data-bs-toggle="pill" 
-                  data-bs-target="#legs${stgid}" type="button" role="tab" aria-controls="legs" 
-                  aria-selected="true">Legs</a>
-              </li> 
-              <li class="nav-item" role="presentation"> 
-              <a href="#" class="nav-link" id="greeks-tab${stgid}" data-bs-toggle="pill" 
-                data-bs-target="#greeks${stgid}" type="button" role="tab" aria-controls="greeks" 
-                aria-selected="false">Greeks</a> 
-              </li> 
-              <li class="nav-item" role="presentation"> 
-                <a href="#" class="nav-link disabled" id="other-tab${stgid}" data-bs-toggle="pill" 
-                  data-bs-target="#other${stgid}" type="button" role="tab" aria-controls="other" 
-                  aria-selected="false" tabindex="-1" aria-disabled="true">Disabled</a> 
-              </li> 
-            </ul> 
-          </div> 
-        </div> 
-        <div class="card-body tab-content"> 
-          <div class="tab-pane fade show active" id="legs${stgid}" role="tabpanel" 
-            aria-labelledby="legs-tab${stgid}"> 
-            <div class="table-responsive"> 
-              <table class="table table-sm mb-0"> 
-                <thead>
-                  <tr> 
-                    <th scope="col">#</th> 
-                    <th scope="col">Instrument</th> 
-                    <th scope="col">B/S</th> 
-                    <th scope="col">Qty</th> 
-                    <th scope="col">Entry Price</th> 
-                    <th scope="col">Current Price</th> 
-                    <th scope="col">Live P&L</th> 
-                    <th scope="col">Exit Price</th> 
-                    <th scope="col">P&L</th> 
-                    <th scope="col"> </th>  
-                  </tr>
-                </thead> 
-                <tbody><tr><td colspan="10">BUY or SELL (add a Leg)</td></tr></tbody> 
-              </table> 
-            </div> 
-          </div> 
-          <div class="tab-pane fade" id="greeks${stgid}" role="tabpanel" 
-            aria-labelledby="greeks-tab${stgid}"> Greeks </div>  
-          <div class="tab-pane fade" id="other${stgid}" role="tabpanel" 
-            aria-labelledby="other-tab${stgid}"> Other </div> 
-        </div> 
-        <div class="card-footer text-muted"> 
-          <small>${new Date().toLocaleString()}</small> 
-          <a href="#" class="me-2 bi-save-fill text-success float-end"></a> 
-          <a href="#" class="me-2 bi-trash text-danger float-end"></a> 
-        </div>
-      </div>`;
+  showTrades(event) {
+    const stgID = event.detail.stg;
+
+    console.log("Show Trades stg " + stgID);
+    if (this.stg.id !== stgID) {
+      console.log("Caught show trades in Editor for some other strategy!!");
+      return;
     }
- */
+
+    this.update(this.stg, !this.tradesShowing);
+  }
+
+  _getFullCard(stg, showTrades=false) {
+    // // Raises savstg, delleg and delstg events
     
     let allLegs = "";
     for (let i = 0; i < stg.legs.length; i++) {
@@ -1139,7 +823,7 @@ class StrategyFullCardElement extends HTMLDivElement {
       let row = `<tr>
       <th scope="row">${(i + 1).toString()}</th>
       <td> ${leg.key}</td>
-      <td> ${new Date(leg.createTime).toLocaleString("en-IN")}</td>
+      <td> ${DateOps.toLocalFullPIDisplayFromTimestampMSecs(leg.createTime)}</td>
       <td>${leg.isBuy ? "Buy" : "Sell"}</td>
       <td>${(leg.isBuy || leg.lots === 0) ? "" : "-"}${leg.tqty.toString()}</td>
       <td>${leg.entryPrice.toFixed(2)}</td>
@@ -1156,6 +840,29 @@ class StrategyFullCardElement extends HTMLDivElement {
       `;
 
       allLegs += row;
+
+      if (showTrades) {
+        const allTrades = leg.allTrades;
+        for (let j = 0; j < allTrades.length; j++) {
+          const trade = allTrades[j];
+
+          let trow = `<tr>
+          <th scope="row" align="right">+${(j + 1).toString()}</th>
+          <td></td>
+          <td> ${DateOps.toLocalFullPIDisplayFromTimestampMSecs(trade.tod)}</td>
+          <td>${trade.isBuy ? "Buy" : "Sell"}</td>
+          <td>${(trade.isBuy || trade.qty === 0) ? "" : "-"}${trade.qty.toString()}</td>
+          <td>${trade.prc.toFixed(2)}</td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          </tr>
+          `;
+
+          allLegs += trow;
+        }
+      }
     }
 
     if (allLegs.length === 0) {
@@ -1256,6 +963,11 @@ class StrategyFullCardElement extends HTMLDivElement {
             onclick=" this.dispatchEvent(new CustomEvent('rldstg', {
               bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } }))">
           </a>
+
+          <a title="Show / Hide Trades" href="#/" class="me-2 bi-card-list text-success fw-bold float-end" 
+            onclick=" this.dispatchEvent(new CustomEvent('shwtrd', {
+              bubbles: true, cancelable: true, detail: { stg: '${stg.id}' } }))">
+          </a>
         </div>
       </div>
     </div>`;
@@ -1323,7 +1035,9 @@ class StrategyValueCardElement extends HTMLDivElement {
 
     this.stg = stg;
     this.className = "col mb-3";
-    this.style.cursor = "move";
+    if (this.stg) {
+      this.style.cursor = "move";
+    }
     this.innerHTML = this.getValueCard(stg, stgInEdit);
   }
 
@@ -1413,134 +1127,6 @@ class StrategyValueCardElement extends HTMLDivElement {
   // there can be other element methods and properties
 }
 customElements.define("strategy-card", StrategyValueCardElement, {extends: 'div'});
-
-class DragNDropManager {
-  // Parent must call attachEventHandlersTo() & provide save() to save the reordered list
-  //
-  constructor(parentNode) {
-    // All the elements that are 'draggable' must be children of this parentNode
-    this.parentNode = parentNode;
-    this.id = parentNode.id;
-    this.parentNode.dragover = (ev, elem) => this.dragover(ev, elem);
-    this.placeholder = null;
-    this.movedCardNIdx = null;
-  }
-
-  getCardNIdx(id) {
-    const children = this.parentNode.children;
-    for (let i = 0; i < children.length; i++) {
-      if (children[i].id && id == children[i].id) {
-        return { "idx" : i, "card" : children[i] };
-      }
-    }
-  }
-
-  attachEventHandlersTo(card) {
-
-    card.addEventListener("dragstart", (ev) => this.dragstart(ev));
-
-    card.addEventListener("dragenter", function(ev) {
-      //console.log(`drag enter [${this.id}] tgt [${ev.target.id}] data [${ev.dataTransfer.getData("text")}]`);
-    });
-
-    card.addEventListener("dragover", function(ev) {
-      const tgtID = ev.dataTransfer.getData("text");
-      //console.log(`drag over [${this.id}] tgt [${ev.target.id}] data [${tgtID}]`);
-
-      // only a watchcard can be dropped on the watchlist
-      if (this.parentNode.movedCardNIdx && this.parentNode.movedCardNIdx.card.id === tgtID && 
-          this.id !== tgtID) {
-        ev.preventDefault();
-        ev.dataTransfer.dropEffect = "move";
-        this.parentNode.dragover(ev, this);
-      }
-    });
-
-    card.addEventListener("dragleave", function(ev) {
-      //console.log(`drag leave [${this.id}] tgt [${ev.target.id}] data [${ev.dataTransfer.getData("text")}]`);
-    });
-
-    card.addEventListener("drop", function(ev) {
-      ev.preventDefault();
-      //console.log(`drag drop [${this.id}] tgt [${ev.target.id}] data [${ev.dataTransfer.getData("text")}]`);
-      
-      this.parentNode.insertBefore(this.parentNode.movedCardNIdx.card, this);
-    });
-
-    card.addEventListener("dragend", (ev) => this.dragend(ev));
-  }
-
-  dragstart(ev) {
-    //console.log(`drag start [${this.id}] tgt [${ev.target.id}]`);
-
-    ev.dataTransfer.setData("text", ev.target.id);
-    ev.dataTransfer.effectAllowed = "move";
-
-    this.parentNode.movedCardNIdx = this.getCardNIdx(ev.target.id);
-    this.movedCardNIdx = this.parentNode.movedCardNIdx;
-
-    const rect = this.movedCardNIdx.card.getBoundingClientRect();
-    // Save the height and width of the card being moved
-    this.movedCardNIdx.height = rect.height;
-    this.movedCardNIdx.width = rect.width;
-    this.movedCardNIdx.card.style.cursor = "move";
-
-    this.movedCardNIdx.card.style.position = "absolute";
-    this.movedCardNIdx.card.style.top = `${-rect.height}px`;
-    this.movedCardNIdx.card.style.left = `${-rect.width}px`;
-  }
-
-  crtPlaceholder() {
-    this.placeholder = document.createElement('div');
-    this.placeholder.id = "placeholder";
-    this.placeholder.setAttribute("name", "placeholder");
-    this.placeholder.style.height = this.movedCardNIdx.height.toString() + "px";
-    this.placeholder.style.width = this.movedCardNIdx.width.toString() + "px";
-    //console.log("Place holder height " + this.placeholder.style.height);
-    //console.log("Place holder width " + this.placeholder.style.width);
-
-    this.placeholder.addEventListener("drop", function(ev) {
-      ev.preventDefault();
-      //console.log(`drag drop on placeholder, data [${ev.dataTransfer.getData("text")}]`);
-      
-      this.parentNode.insertBefore(this.parentNode.movedCardNIdx.card, this);
-    });
-
-    this.placeholder.addEventListener("dragover", function(ev) {
-      const tgtID = ev.dataTransfer.getData("text");
-      //console.log(`drag over [${this.id}] tgt [${ev.target.id}] data [${tgtID}]`);
-      
-      ev.preventDefault();
-    });
-  }
-
-  dragover(ev, overEl) {
-    if (!this.placeholder) {
-      this.crtPlaceholder();
-    }
-
-    // inserBefore can move the placeholder from previous position to new
-    this.parentNode.insertBefore(this.placeholder, overEl);
-  }
-
-  dragend(ev) {
-    //console.log(`drag end [${this.id}] tgt [${ev.target.id}] data [${ev.dataTransfer.getData("text")}]`);
-
-    this.movedCardNIdx = this.parentNode.movedCardNIdx;
-    this.movedCardNIdx.card.style.cursor = "move";
-    this.movedCardNIdx.card.style.removeProperty("top");
-    this.movedCardNIdx.card.style.removeProperty("left");
-    this.movedCardNIdx.card.style.removeProperty("position");
-    
-    if (this.placeholder) {
-      this.parentNode.removeChild(this.placeholder);
-    }
-
-    this.movedCardNIdx = null;
-    this.parentNode.movedCardNIdx = null;
-    this.parentNode.save();
-  }
-}
 
 class StrategyValueCardElementList extends HTMLDivElement {
   constructor() {
